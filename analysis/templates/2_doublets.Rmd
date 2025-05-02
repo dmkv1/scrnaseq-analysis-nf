@@ -1,0 +1,81 @@
+---
+title: "`r params$sample_id` - doublet detection"
+output:
+  html_notebook:
+    code_folding: hide
+params:
+  sample_id: "P009_DG"
+  path_sce_input: "P009_DG_cells.sce"
+  path_sce_output: "test_sce.rds"
+  seed: 42
+---
+
+```{r setup}
+sample_id <- params$sample_id
+path_sce_input <- params$path_sce_input
+path_sce_output <- params$path_sce_output
+seed <- params$seed
+set.seed(seed)
+
+# Load the libraries
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(scDblFinder)
+})
+```
+
+# Read the sce
+
+```{r load_sce}
+sce <- readRDS(path_sce_input)
+sce
+```
+
+# Run scDblFinder
+
+```{r run_scDblFinder}
+sce <- scDblFinder(
+  sce,
+  clusters = FALSE
+)
+```
+
+# Resulting sce
+
+```{r sce_result}
+sce
+```
+
+```{r write_sce}
+saveRDS(sce, path_sce_output)
+```
+
+# Metrics
+
+```{r doublet_counts}
+n_singlets <- sum(sce$scDblFinder.class == "singlet")
+n_doublets <- sum(sce$scDblFinder.class == "doublet")
+doublet_rate <- n_doublets / (n_singlets + n_doublets)
+```
+
+The sample `r sample_id` contains `r n_singlets` singlets and `r n_doublets` doublets (`r doublet_rate * 100` %).
+
+```{r store_metrics}
+metrics <- list(
+  sample_id = sample_id,
+  n_singlets = n_singlets,
+  n_doublets = n_doublets,
+  doublet_rate = doublet_rate
+)
+writeLines(jsonlite::toJSON(metrics, pretty=TRUE), paste0(sample_id, "_doublet_metrics.json"))
+```
+
+# Session info
+
+```{r sessionInfo}
+print(sessionInfo())
+```
+
+```{r gc}
+gc()
+```

@@ -1,0 +1,258 @@
+---
+title: "`r params$sample_id` - cell QC"
+output:
+  html_notebook:
+    code_folding: hide
+params:
+  sample_id: "P009_DG"
+  path_sce_input: "P009_DG_singlets.sce"
+  path_sce_output: "test_sce.rds"
+  nUMI_thresh: 600
+  nGenes_thresh: 300
+  mitochondrial_thresh: 10
+  cluster_discard_thresh: 0.33
+  seed: 42
+---
+
+```{r setup}
+sample_id <- params$sample_id
+path_sce_input <- params$path_sce_input
+path_sce_output <- params$path_sce_output
+nUMI_thresh <- as.numeric(params$nUMI_thresh)
+nGenes_thresh <- as.numeric(params$nGenes_thresh)
+mitochondrial_thresh <- as.numeric(params$mitochondrial_thresh)
+cluster_discard_thresh <- as.numeric(params$cluster_discard_thresh)
+
+seed <- params$seed
+set.seed(seed)
+
+# Load the libraries
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(Seurat)
+  library(scater)
+  library(scran)
+  library(stringr)
+  library(dplyr)
+  library(patchwork)
+})
+
+# QC plots function
+QC_plots <- function(sce, color_groups, nUMI_thresh, nGenes_thresh, mitochondrial_thresh) {
+  scater::plotColData(sce, y = "sum", color_by = color_groups) + scale_y_continuous(trans = "log10") +
+    geom_hline(yintercept = nUMI_thresh, linetype = "dashed") +
+    labs(y = "UMIs per cell, log10") +
+    
+    scater::plotColData(sce, y = "detected", color_by = color_groups) + scale_y_continuous(trans = "log10") +
+    geom_hline(yintercept = nGenes_thresh, linetype = "dashed") +
+    labs(y = "Genes per cell, log10") +
+    
+    scater::plotColData(sce, y = "subsets_Mito_percent", color_by = color_groups) + scale_y_continuous(limits = c(0, 100)) +
+    geom_hline(yintercept = mitochondrial_thresh, linetype = "dashed") +
+    labs(y = "% mitochondrial genes") +
+    
+    scater::plotColData(sce, y = "libComplexity", color_by = color_groups) +
+    labs(y = "log10(nGenes) / log10(nUMIs)") +
+    
+    scater::plotColData(sce, y = "subsets_Ribo_percent", color_by = color_groups) + scale_y_continuous(limits = c(0, 100)) +
+    labs(y = "% ribosomal genes") +
+    
+    scater::plotColData(sce, y = "Mito_Ribo_Ratio", color_by = color_groups) +
+    labs(y = "%Mito / (%Mito + %Ribo)") +
+    
+    scater::plotColData(sce,
+                        x = "sum",
+                        y = "detected",
+                        color_by = color_groups) +
+    scale_x_continuous(trans = "log10") +
+    scale_y_continuous(trans = "log10") +
+    geom_vline(xintercept = nUMI_thresh, linetype = "dashed") +
+    geom_hline(yintercept = nGenes_thresh, linetype = "dashed") +
+    labs(x = "UMIs per cell, log10", y = "Genes per cell, log10") +
+    
+    scater::plotColData(sce,
+                        x = "detected",
+                        y = "libComplexity",
+                        color_by = color_groups) +
+    scale_x_continuous(trans = "log10") +
+    geom_vline(xintercept = nGenes_thresh, linetype = "dashed") +
+    labs(x = "Genes per cell, log10", y = "log10(nGenes) / log10(nUMIs)") +
+    
+    scater::plotColData(sce,
+                        x = "detected",
+                        y = "Mito_Ribo_Ratio",
+                        color_by = color_groups) +
+    scale_x_continuous(trans = "log10") +
+    geom_vline(xintercept = nGenes_thresh, linetype = "dashed") +
+    labs(x = "Genes per cell, log10", y = "%Mito / (%Mito + %Ribo)")
+}
+```
+
+# Read the sce
+
+```{r load_sce}
+sce <- readRDS(path_sce_input)
+sce
+```
+
+# Remove doublets detected in the previous step
+
+```{r remove_doublets}
+sce <- sce[, sce$scDblFinder.class == "singlet"]
+sce
+```
+
+# Add QC metrics
+
+```{r add_QC_metrics}
+QC.genes <- list(
+    Mito = stringr::str_which(rowData(sce)[["Symbol"]], "^MT-"),
+    Ribo = stringr::str_which(rowData(sce)[["Symbol"]], "^RPL")
+    )
+
+sce <- addPerCellQCMetrics(sce, subsets = QC.genes)
+
+sce$libComplexity <- log10(sce$detected) / log10(sce$sum)
+sce$Mito_Ribo_Ratio <- sce$subsets_Mito_percent / (sce$subsets_Mito_percent + sce$subsets_Ribo_percent)
+
+sce$discard <- sce$sum < nUMI_thresh |
+  sce$detected < nGenes_thresh |
+  sce$subsets_Mito_percent > mitochondrial_thresh
+
+sce
+```
+
+```{r QC_plots, fig.width=11.2, fig.height=7}
+metrics_QC_discard <- QC_plots(sce,
+                               "discard",
+                               nUMI_thresh,
+                               nGenes_thresh,
+                               mitochondrial_thresh)
+metrics_QC_discard
+```
+
+# Seurat clustering
+
+```{r seurat_clustering}
+rownames(sce) <- rowData(sce)[["Symbol"]]
+
+seurat <- as.Seurat(sce, counts = "counts", data = NULL)
+
+seurat <- NormalizeData(seurat,
+                        normalization.method = "LogNormalize",
+                        scale.factor = 10000)
+seurat <- FindVariableFeatures(
+  seurat,
+  selection.method = "vst",
+  loess.span = 0.3,
+  nfeatures = 2000
+)
+seurat <- ScaleData(seurat, model.use = "linear")
+seurat <- RunPCA(seurat)
+seurat <- RunUMAP(seurat, reduction = "pca", dims = 1:20)
+seurat <- FindNeighbors(
+  seurat,
+  k.param = c(30),
+  reduction = "pca",
+  dims = 1:20
+)
+seurat <- FindClusters(seurat,
+                       resolution = 0.5)
+```
+
+```{r transfer_results_to_sce}
+reducedDims(sce)[["UMAP"]] <- Embeddings(seurat, reduction = "umap")
+sce[["clusters"]] <- seurat$seurat_clusters
+```
+
+```{r UMAP_plot, fig.width=11, fig.height=5}
+plotUMAP(sce,
+         color_by = "clusters",
+         text_by = "clusters") +
+  plotUMAP(sce,
+         color_by = "discard")
+```
+
+# Discard problematic cells
+
+```{r discard_rates}
+cluster_discard_stats <- table(colData(sce)[["clusters"]], colData(sce)[["discard"]])
+
+cluster_discard_proportions <- prop.table(cluster_discard_stats, margin = 1)[, "TRUE"]
+
+discard_rates <- data.frame(
+  Cluster = names(cluster_discard_proportions),
+  Cells = cluster_discard_stats[, "FALSE"],
+  Discard = cluster_discard_stats[, "TRUE"],
+  Discard_Rate = round(cluster_discard_proportions, 3)
+)
+
+discard_rates <- discard_rates[order(discard_rates$Discard_Rate, decreasing = TRUE), ]
+discard_rates
+```
+
+```{r discard_rates_plot}
+ggplot(discard_rates, aes(x = reorder(Cluster, -Discard_Rate), y = Discard_Rate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_hline(yintercept = cluster_discard_thresh, linetype = "dashed", color = "firebrick") +
+  theme_minimal() +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  labs(x = "Cluster", y = "Discard Rate", title = "Proportion of cells to discard by cluster")
+```
+
+```{r detect_problematic_clusters}
+problematic_clusters <- names(cluster_discard_proportions[cluster_discard_proportions > cluster_discard_thresh])
+
+if (length(problematic_clusters) > 0) {
+  cat(
+    "Removing the following clusters with >",
+    cluster_discard_thresh * 100,
+    "% discard rate:",
+    paste(problematic_clusters, collapse = ", "),
+    "\n"
+  )
+  
+  # Mark cells in problematic clusters for removal
+  problematic_cells <- colData(sce)$seurat_clusters %in% problematic_clusters
+  colData(sce)$discard[problematic_cells] <- TRUE
+} else {
+  cat("No clusters found with discard rate >",
+      cluster_discard_thresh * 100,
+      "%\n")
+}
+```
+
+```{r generate_and_store_metrics}
+metrics <- list(
+  sample_id = sample_id,
+  total_cells = ncol(sce),
+  qc_cells = sum(!colData(sce)[["discard"]]),
+  discard_cells = sum(colData(sce)[["discard"]])
+)
+metrics[["discard_ratio"]] <- round(metrics$discard_cells / metrics$total_cells, 3)
+
+writeLines(jsonlite::toJSON(metrics, pretty=TRUE), paste0(sample_id, "_cell_QC_metrics.json"))
+```
+
+Sample `r metrics$sample_id` has `r metrics$qc_cells` cells which passed QC and `r metrics$discard_cells` cells marked for removal (`r metrics$discard_ratio * 100` %).
+
+# Write resulting sce
+
+```{r print_sce}
+sce_clean <- sce[, !colData(sce)$discard]
+sce_clean
+```
+
+```{r write_sce}
+saveRDS(sce_clean, path_sce_output)
+```
+
+# Session info
+
+```{r sessionInfo}
+print(sessionInfo())
+```
+
+```{r gc}
+gc()
+```

@@ -1,0 +1,210 @@
+---
+title: "`r params$sample_id` - empty drops filtering"
+output:
+  html_notebook:
+    code_folding: hide
+params:
+  sample_id: "P009_DG"
+  expected_cells: 3000
+  patient_id: "P009"
+  timepoint: "DG"
+  compartment: "PBMC"
+  counts_dir: "P009_DG_Solo.out"
+  FDR_thresh: 0.01
+  path_sce_output: "test_sce.rds"
+  seed: 42
+---
+
+```{r setup}
+# Import variables
+sample_id <- params$sample_id
+expected_cells <- as.numeric(params$expected_cells)
+patient_id <- params$patient_id
+timepoint <- params$timepoint
+compartment <- params$compartment
+counts_dir <- params$counts_dir
+
+# Thresholds for cell filtering
+UMI_thresh <- as.numeric(params$UMI_thresh)
+FDR_thresh <- as.numeric(params$FDR_thresh)
+
+path_sce_output <- params$path_sce_output
+
+seed <- params$seed
+set.seed(seed)
+
+# Load the libraries
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(DropletUtils)
+  library(ggplot2)
+})
+```
+
+# Load the counts into an SCE
+
+```{r load_counts}
+sample_path <- file.path(counts_dir)
+sce_unfiltered <- DropletUtils::read10xCounts(
+  sample_path,
+  sample.names = sample_id,
+  col.names = TRUE
+)
+
+# Assing sample column values
+sce_unfiltered[["Patient"]] <- patient_id
+sce_unfiltered[["Timepoint"]] <- timepoint
+sce_unfiltered[["Compartment"]] <- compartment
+
+# Avoid barcode collision
+colnames(sce_unfiltered) <- paste(colData(sce_unfiltered)[["Barcode"]],
+                                  colData(sce_unfiltered)[["Sample"]],
+                                  sep = "-"
+)
+
+sce_unfiltered
+```
+
+# Remove fully empty droplets
+
+```{r remove_empty}
+# Calculate library sizes for each droplet
+libSizes <- colSums(assays(sce_unfiltered)$counts)
+
+# Remove droplets that are completely empty
+sce_droplets <- sce_unfiltered[, libSizes > 0]
+sce_droplets
+```
+
+# Write droplets matrix
+
+```{r write_droplets}
+saveRDS(sce_droplets, paste0(sample_id, "_droplets.sce"))
+```
+
+# Knee plot
+
+```{r knee_plot, fig.width=8.5, fig.height=6}
+barcode_ranks <- barcodeRanks(sce_droplets)
+
+plot(
+  barcode_ranks$rank,
+  barcode_ranks$total,
+  log = "xy",
+  xlab = "Rank",
+  ylab = "Total"
+)
+o <- order(barcode_ranks$rank)
+lines(barcode_ranks$rank[o], barcode_ranks$fitted[o], col = "red")
+
+abline(
+  h = metadata(barcode_ranks)$knee,
+  col = "dodgerblue",
+  lty = 2
+)
+abline(
+  h = metadata(barcode_ranks)$inflection,
+  col = "forestgreen",
+  lty = 2
+)
+legend(
+  "bottomleft",
+  lty = 2,
+  col = c("dodgerblue", "forestgreen"),
+  legend = c("knee", "inflection")
+)
+```
+
+# Droplets to cells
+
+```{r droplets_to_cells}
+droplet_stats_raw <- DropletUtils::emptyDropsCellRanger(
+  counts(sce_droplets),
+  n.expected.cells = expected_cells,
+  niters = 50000)
+
+# Filter the droplets using set thresholds
+droplet_stats <- as.data.frame(droplet_stats_raw)
+droplet_stats <- droplet_stats[!is.na(droplet_stats$FDR), ]
+
+droplet_stats$is_cell <- FALSE
+droplet_stats$is_cell[droplet_stats$FDR < FDR_thresh] <- TRUE
+```
+
+Number of detected cells:
+
+```{r}
+is.cell <- droplet_stats_raw$FDR <= FDR_thresh
+sum(is.cell, na.rm=TRUE)
+```
+
+`DropletUtils::emptyDropsCellRanger` returns a data frame with barcode, UMI count and an FDR value.
+First, we remove the barcodes where FDR is `NA`.
+Then, we remove the barcodes based on the FDR threshold (FDR <= `r FDR_thresh`).
+
+```{r FDR_plot, fig.width=8.5, fig.height=6}
+total_droplets <- dim(sce_droplets)[2]
+n_cell_candidates <- dim(droplet_stats)[1]
+n_cells <- sum(droplet_stats$is_cell)
+n_cell_dropouts <- sum(!droplet_stats$is_cell)
+
+subtitle_text <- paste0(
+  "Initial droplets: ", total_droplets,
+  "\nCell candidates: ", n_cell_candidates,
+  "\nUMI threshold: ", UMI_thresh,
+  "\nFDR threshold: ", FDR_thresh,
+  "\nCells: ", n_cells,
+  "\nNot cells: ", n_cell_dropouts
+)
+
+FDR_plot <- ggplot(droplet_stats, aes(x = Total, y = -log10(FDR))) +
+  geom_point(aes(color = is_cell)) +
+  geom_hline(yintercept = -log10(FDR_thresh), color = "firebrick", linetype = "dashed") +
+  geom_vline(xintercept = UMI_thresh, color = "firebrick", linetype = "dashed") +
+  scale_x_continuous(trans = "pseudo_log") +
+  labs(
+    title = sample_id,
+    caption = subtitle_text,
+    x = "Total UMI count for each barcode, log2 scale") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+FDR_plot
+```
+
+# Resulting SCE
+
+```{r filter_sce}
+# Filter the SCE by the cell barcodes
+sce_cells <- sce_droplets[, rownames(droplet_stats[droplet_stats$is_cell, ])]
+sce_cells
+```
+
+```{r write_sce}
+saveRDS(sce_cells, path_sce_output)
+```
+
+# Metrics
+
+```{r store_metrics}
+metrics <- list(
+  sample_id = sample_id,
+  n_droplets = total_droplets,
+  n_cell_candidates = n_cell_candidates,
+  UMI_threshold = UMI_thresh,
+  FDR_threshold = FDR_thresh,
+  n_cells = n_cells,
+  cells_ratio = n_cells / n_cell_candidates
+)
+writeLines(jsonlite::toJSON(metrics, pretty=TRUE), paste0(sample_id, "_droplet_metrics.json"))
+```
+
+# Session info
+
+```{r sessionInfo}
+print(sessionInfo())
+```
+
+```{r gc}
+gc()
+```
