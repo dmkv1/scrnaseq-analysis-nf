@@ -6,7 +6,8 @@ tmp
 *.RData
 
 .nextflow/
-*.log*
+.nextflow.pid
+*nextflow.log*
 work/
 results/
 
