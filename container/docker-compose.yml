@@ -11,5 +11,5 @@ services:
     volumes:
       - type: "bind"
         source: "/home/dmitryk/Projects/MCL-PhanthomMenace"
-        target: "/home/rstudio/scrnaseq"
+        target: "/home/dmitryk/Projects/MCL-PhanthomMenace"
     restart: always
