@@ -1,0 +1,66 @@
+FROM rocker/rstudio:4.4.3
+
+LABEL name="RStudio"
+# https://rocker-project.org/
+# https://davetang.org/muse/2021/04/24/running-rstudio-server-with-docker/
+
+COPY rstudio-prefs.json /home/rstudio/.config/rstudio/rstudio-prefs.json
+RUN chown -R rstudio:rstudio /home/rstudio/
+
+RUN apt update && apt upgrade -y
+RUN apt install curl cmake patch -y
+RUN apt install libz-dev libglpk-dev libhdf5-dev liblzma-dev libbz2-dev libcairo2-dev libxt-dev \
+                libharfbuzz-dev libfribidi-dev \
+                libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev -y
+
+# STAR aligner
+# COPY STAR /usr/local/bin/STAR
+# RUN chmod -R 777 /usr/local/bin/STAR
+
+# Utility R packages
+RUN Rscript -e 'install.packages(c("R.utils", "devtools", "remotes", "markdown"))' && \
+    Rscript -e 'install.packages("tidyverse")' && \
+    Rscript -e 'install.packages("openxlsx")' && \
+    Rscript -e 'install.packages("gdata")' && \
+    Rscript -e 'install.packages(c("cowplot", "ggpubr", "ggrepel"))' && \
+    Rscript -e 'install.packages("VennDiagram")' && \
+    Rscript -e 'install.packages("BiocManager")'
+RUN Rscript -e 'BiocManager::install("org.Hs.eg.db")'
+
+# Packages used for analysis
+
+## Single cell packages 
+RUN Rscript -e 'install.packages("Seurat")'
+RUN Rscript -e 'BiocManager::install("SingleCellExperiment")'
+RUN Rscript -e 'BiocManager::install("DropletUtils")'
+RUN Rscript -e 'BiocManager::install("scater")'
+RUN Rscript -e 'BiocManager::install("scran")'
+RUN Rscript -e 'BiocManager::install("bluster")'
+RUN Rscript -e 'BiocManager::install("scDblFinder")'
+RUN Rscript -e 'BiocManager::install("SingleR")'
+RUN Rscript -e 'BiocManager::install("celldex")'
+RUN Rscript -e 'BiocManager::install("tricycle")'
+RUN Rscript -e 'BiocManager::install("batchelor")'
+
+## Visualizations
+RUN Rscript -e 'BiocManager::install("ComplexHeatmap")'
+RUN Rscript -e 'install.packages("UpSetR")'
+RUN Rscript -e 'install.packages("lemon")'
+RUN Rscript -e 'install.packages("hexbin")'
+RUN Rscript -e 'BiocManager::install("ggtree")'
+
+# VCF analysis
+RUN Rscript -e 'BiocManager::install("VariantAnnotation")'
+
+# inferCNV
+RUN apt install jags -y
+RUN Rscript -e 'remotes::install_github("https://github.com/dmkv1/infercnv_recolor.git")'
+
+# DE testing
+RUN Rscript -e 'BiocManager::install("DEsingle")'
+RUN Rscript -e 'devtools::install_github("cz-ye/DECENT")'
+RUN Rscript -e 'BiocManager::install("ReactomePA")'
+
+
+# to fix Matrix cholmod bug
+RUN Rscript -e 'install.packages("irlba")'

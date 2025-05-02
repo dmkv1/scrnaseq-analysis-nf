@@ -1,0 +1,12 @@
+{
+    "save_workspace": "never",
+    "always_save_history": false,
+    "reuse_sessions_for_project_links": true,
+    "posix_terminal_shell": "bash",
+    "initial_working_directory": "/media/data",
+    "help_font_size_points": 12,
+    "font_size_points": 12,
+    "editor_theme": "Vibrant Ink",
+    "server_editor_font_enabled": true,
+    "server_editor_font": "Fira Code"
+}
