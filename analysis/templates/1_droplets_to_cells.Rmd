@@ -1,15 +1,13 @@
 ---
 title: "`r params$sample_id` - empty drops filtering"
-output:
-  html_notebook:
-    code_folding: hide
 params:
   sample_id: "P009_DG"
-  expected_cells: 3000
+  expected_cells: 3500
   patient_id: "P009"
   timepoint: "DG"
   compartment: "PBMC"
-  counts_dir: "P009_DG_Solo.out"
+  replicate: "1"
+  counts_dir: "../../alignment/output/P009_DG_PBMC_rep1/P009_DG_PBMC_rep1_Solo.out/Gene/raw"
   FDR_thresh: 0.01
   path_sce_output: "test_sce.rds"
   seed: 42
@@ -22,6 +20,7 @@ expected_cells <- as.numeric(params$expected_cells)
 patient_id <- params$patient_id
 timepoint <- params$timepoint
 compartment <- params$compartment
+replicate <- params$replicate
 counts_dir <- params$counts_dir
 
 # Thresholds for cell filtering
@@ -51,10 +50,18 @@ sce_unfiltered <- DropletUtils::read10xCounts(
   col.names = TRUE
 )
 
-# Assing sample column values
+# Add metadata
+metadata(sce_unfiltered)$Sample <- sample_id
+metadata(sce_unfiltered)$Patient <- patient_id
+metadata(sce_unfiltered)$Timepoint <- timepoint
+metadata(sce_unfiltered)$Compartment <- compartment
+metadata(sce_unfiltered)$Replicate <- replicate
+
+# Assign sample column values
 sce_unfiltered[["Patient"]] <- patient_id
 sce_unfiltered[["Timepoint"]] <- timepoint
 sce_unfiltered[["Compartment"]] <- compartment
+sce_unfiltered[["Replicate"]] <- replicate
 
 # Avoid barcode collision
 colnames(sce_unfiltered) <- paste(colData(sce_unfiltered)[["Barcode"]],
@@ -79,7 +86,9 @@ sce_droplets
 # Write droplets matrix
 
 ```{r write_droplets}
-saveRDS(sce_droplets, paste0(sample_id, "_droplets.sce"))
+# skipping as this matrix is not used
+
+# saveRDS(sce_droplets, paste0(sample_id, "_droplets.sce"))
 ```
 
 # Knee plot

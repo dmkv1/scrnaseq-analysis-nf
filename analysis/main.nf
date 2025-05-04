@@ -6,8 +6,9 @@ nextflow.enable.dsl = 2
 include { DROPLETS_TO_CELLS } from './modules/qc'
 include { DOUBLET_DETECTION } from './modules/qc'
 include { CELL_QC } from './modules/qc'
-// Cell annotations
+// Analysis
 include { SEURAT_CLUSTERING } from './modules/analysis'
+include { INTEGRATION } from './modules/analysis'
 
 workflow {
     seed = Channel.value(params.seed)
@@ -26,9 +27,10 @@ workflow {
             def patient_id = row.patient
             def timepoint = row.timepoint
             def compartment = row.compartment
+            def replicate = row.replicate
             def counts = file(row.counts)
 
-            return [sample_id, expected_cells, patient_id, timepoint, compartment, counts]
+            return [sample_id, expected_cells, patient_id, timepoint, compartment, replicate, counts]
         }
 
     // Execute QC modules
@@ -50,10 +52,19 @@ workflow {
         seed,
     )
 
-    // Cluster cells
     SEURAT_CLUSTERING(
         file("templates/4_seurat_clustering.Rmd"),
         CELL_QC.out.sce,
         seed,
     )
+
+//    all_sample_ids = SEURAT_CLUSTERING.out.sce.map { it[0] }.collect()
+//    all_sces = SEURAT_CLUSTERING.out.sce.collect()
+//
+//    INTEGRATION(
+//        file("templates/5_integration.Rmd"),
+//        all_sample_ids,
+//        all_sces,
+//        seed
+//    )
 }

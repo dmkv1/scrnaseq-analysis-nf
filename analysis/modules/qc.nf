@@ -4,25 +4,29 @@ process DROPLETS_TO_CELLS {
 
     input:
     path '1_droplets_to_cells.Rmd'
-    tuple val(sample_id), val(expected_cells), val(patient_id), val(timepoint), val(compartment), path(counts)
+    tuple val(sample_id), val(expected_cells), val(patient_id), val(timepoint), val(compartment), val(replicate), path(counts)
     val seed
 
     output:
     tuple val(sample_id), path("${sample_id}_droplets_to_cells.nb.html"), emit: report
     tuple val(sample_id), path("${sample_id}_cells.sce"), emit: sce
-    tuple val(sample_id), path("${sample_id}_droplets.sce")
     tuple val(sample_id), path("${sample_id}_droplet_metrics.json"), emit: metrics
 
     script:
     """
     Rscript -e "rmarkdown::render('1_droplets_to_cells.Rmd',
                 output_file = '${sample_id}_droplets_to_cells.nb.html',
+                output_format = 'html_notebook',
+                output_options = list(code_folding = 'hide',
+                                    toc = TRUE,
+                                    toc_float = TRUE),
                 params = list(
                                sample_id = '${sample_id}',
                                expected_cells = '${expected_cells}',
                                patient_id = '${patient_id}',
                                timepoint  = '${timepoint}',
                                compartment = '${compartment}',
+                               replicate = '${replicate}',
                                counts_dir = '${counts}',
                                FDR_thresh = '${params.droplets.FDR_thresh}',
                                path_sce_output = '${sample_id}_cells.sce',
@@ -49,6 +53,10 @@ process DOUBLET_DETECTION {
     """
     Rscript -e "rmarkdown::render('2_doublets.Rmd',
                 output_file = '${sample_id}_doublets.nb.html',
+                output_format = 'html_notebook',
+                output_options = list(code_folding = 'hide',
+                                    toc = TRUE,
+                                    toc_float = TRUE),
                 params = list(
                                sample_id = '${sample_id}',
                                path_sce_input = '${sce}',
@@ -76,6 +84,10 @@ process CELL_QC {
     """
     Rscript -e "rmarkdown::render('3_cell_qc.Rmd',
                 output_file = '${sample_id}_cell_QC.nb.html',
+                output_format = 'html_notebook',
+                output_options = list(code_folding = 'hide',
+                                    toc = TRUE,
+                                    toc_float = TRUE),
                 params = list(
                     sample_id = '${sample_id}',
                     path_sce_input = '${sce}',

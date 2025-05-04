@@ -61,6 +61,8 @@ RUN Rscript -e 'BiocManager::install("DEsingle")'
 RUN Rscript -e 'devtools::install_github("cz-ye/DECENT")'
 RUN Rscript -e 'BiocManager::install("ReactomePA")'
 
-
-# to fix Matrix cholmod bug
+# fix or Matrix cholmod bug
 RUN Rscript -e 'install.packages("irlba")'
+
+# Faster marker detection in Seurat
+RUN Rscript -e 'devtools::install_github("immunogenomics/presto")'

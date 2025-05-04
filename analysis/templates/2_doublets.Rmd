@@ -1,11 +1,8 @@
 ---
 title: "`r params$sample_id` - doublet detection"
-output:
-  html_notebook:
-    code_folding: hide
 params:
   sample_id: "P009_DG"
-  path_sce_input: "P009_DG_cells.sce"
+  path_sce_input: "../results/P009_DG/1_droplets/P009_DG_cells.sce"
   path_sce_output: "test_sce.rds"
   seed: 42
 ---

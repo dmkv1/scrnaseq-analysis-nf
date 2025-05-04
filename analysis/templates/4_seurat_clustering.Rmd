@@ -1,30 +1,22 @@
 ---
 title: "`r params$sample_id` - Seurat analysis and clustering"
-output:
-  html_notebook:
-    code_folding: hide
 params:
   sample_id: "P009_DG"
-  path_sce_input: "P009_DG_cells.sce"
+  path_sce_input: "../results/P009_DG/3_cellQC/P009_DG_cells.sce"
   path_sce_output: "test_sce.rds"
+  path_markers_output: "test_markers.rds"
   FindVariableFeatures_nfeatures: 2000
   RunPCA_npcs: 30
+  PCA_variance_threshold: 2.5
   FindNeighbors_knn: 30
   FindClusters_res: 0.5
+  markers_logfc_thresh: 0.5
+  markers_min_pct: 0.1
+  markers_test_use: "wilcox"
   seed: 42
 ---
 
 ```{r setup}
-sample_id <- params$sample_id
-path_sce_input <- params$path_sce_input
-path_sce_output <- params$path_sce_output
-
-# Seurat parameters
-FindVariableFeatures_nfeatures <- as.numeric(params$FindVariableFeatures_nfeatures)
-RunPCA_npcs <- as.numeric(params$RunPCA_npcs)
-FindNeighbors_knn <- as.numeric(params$FindNeighbors_knn)
-FindClusters_res <- as.numeric(params$FindClusters_res)
-
 seed <- params$seed
 set.seed(seed)
 
@@ -34,8 +26,26 @@ suppressPackageStartupMessages({
   library(Seurat)
   library(scater)
   library(scran)
+  library(dplyr)
   library(patchwork)
 })
+
+# Seurat reduction parameters
+FindVariableFeatures_nfeatures <- as.numeric(params$FindVariableFeatures_nfeatures)
+RunPCA_npcs <- as.numeric(params$RunPCA_npcs)
+PCA_variance_threshold <- as.numeric(params$PCA_variance_threshold)
+# Seurat clustering parameters
+FindNeighbors_knn <- as.numeric(params$FindNeighbors_knn)
+FindClusters_res <- as.numeric(params$FindClusters_res)
+# Seurat markers parameters
+markers_logfc_thresh <- as.numeric(params$markers_logfc_thresh)
+markers_min_pct <- as.numeric(params$markers_min_pct)
+markers_test_use <- params$markers_test_use
+
+sample_id <- params$sample_id
+path_sce_input <- params$path_sce_input
+path_sce_output <- params$path_sce_output
+path_markers_output <- params$path_markers_output
 ```
 
 # Read the sce
@@ -45,9 +55,17 @@ sce <- readRDS(path_sce_input)
 sce
 ```
 
+```{r remove_ribosomal_genes}
+ribo_genes_indices <- stringr::str_which(rowData(sce)[["Symbol"]], "^RPL|^RPS")
+sce <- sce[-ribo_genes_indices, ]
+sce
+```
+
 # Seurat processing
 
 ```{r seurat_conversion}
+reducedDims(sce)[["PCA"]] <- NULL
+reducedDims(sce)[["UMAP"]] <- NULL
 seurat <- as.Seurat(sce, counts = "counts", data = NULL)
 seurat
 ```
@@ -76,29 +94,55 @@ vst_plot
 ```
 
 ```{r scaling}
-seurat <- ScaleData(seurat, model.use = "linear")
+seurat <- ScaleData(seurat,
+                    model.use = "linear",
+                    features = rownames(seurat)
+                    )
 ```
 
 ```{r PCA}
 seurat <- RunPCA(seurat, seed.use = seed, npcs = RunPCA_npcs)
 ```
 
-```{r elbow_plot}
-ElbowPlot(seurat)
-```
+```{r variance_thresholding}
+# Extract variance explained by each PC
+pca_variance <- (seurat@reductions$pca@stdev)^2
+percent_var <- 100 * pca_variance / sum(pca_variance)
 
+# Choose PCs that explain more than the threshold percentage of variance
+chosen_pcs <- length(which(percent_var > PCA_variance_threshold))
+cat("Number of PCs selected based on variance threshold (>", PCA_variance_threshold, "%):", chosen_pcs, "\n")
+
+# Create a data frame for visualization
+variance_df <- data.frame(
+  PC = 1:length(percent_var),
+  PercentVariance = percent_var,
+  Selected = ifelse(percent_var > PCA_variance_threshold, "Yes", "No")
+)
+
+# Plot the variance explained by each PC
+ggplot(variance_df, aes(x = PC, y = PercentVariance)) +
+  geom_bar(stat = "identity", aes(fill = Selected)) +
+  geom_hline(yintercept = PCA_variance_threshold, linetype = "dashed", color = "red") +
+  scale_fill_manual(values = c("No" = "gray", "Yes" = "blue")) +
+  labs(
+    title = paste0("PCs with >", PCA_variance_threshold, "% variance: ", chosen_pcs),
+    x = "Principal Component",
+    y = "Percent Variance Explained"
+  ) +
+  theme_minimal()
+```
 
 ```{r UMAP}
-seurat <- RunUMAP(seurat, reduction = "pca", dims = 1:20)
+seurat <- RunUMAP(seurat, reduction = "pca", dims = 1:chosen_pcs)
 ```
-
 
 ```{r clustering}
 seurat <- FindNeighbors(
   seurat,
   k.param = FindNeighbors_knn,
   reduction = "pca",
-  dims = 1:20
+  dims = 1:chosen_pcs
 )
 seurat <- FindClusters(seurat,
                        resolution = FindClusters_res)
@@ -132,21 +176,68 @@ sce[["clusters"]] <- seurat$seurat_clusters
 sce
 ```
 
-
 ```{r UMAP_plot, fig.width=5.5, fig.height=5}
 plotUMAP(sce,
          color_by = "clusters",
          text_by = "clusters")
 ```
 
-# Write resulting sce
+# Cluster markers
 
-```{r print_sce}
-sce
+```{r calculate_markers}
+markers <- FindAllMarkers(
+  seurat,
+  logfc.threshold = markers_logfc_thresh,
+  min.pct = markers_min_pct,
+  test.use = markers_test_use,
+  only.pos = TRUE
+)
 ```
+
+```{r cluster_markers}
+top10_markers <- markers %>% 
+  arrange(cluster, desc(pct.1), desc(avg_log2FC)) %>% 
+  group_by(cluster) %>% 
+  slice_head(n = 10)
+top10_markers
+```
+
+```{r, fig.width=10, fig.height=9}
+features <- top10_markers %>%
+  slice_head(n = 1) %>%
+  pull(gene, name = cluster)
+
+featurePlots <- list()
+for (cluster in names(features)) {
+  featurePlots[[features[[cluster]]]] <- plotUMAP(sce, color_by = features[[cluster]], text_by = "clusters") +
+    theme_void() +
+    guides(color = guide_colorbar(title = "expr")) +
+    theme(
+      panel.border = element_rect(
+        color = "black",
+        fill = NA,
+        linewidth = 0.5
+      ),
+      plot.margin = margin(2, 2, 2, 2)
+    ) +
+    labs(title = paste0("cluster ", cluster, ": ", features[[cluster]]))
+}
+featurePlots <- wrap_plots(featurePlots)
+featurePlots
+```
+
+```{r markers_heatmap, fig.width=12, fig.height=10}
+DoHeatmap(seurat, features = top10_markers$gene) + NoLegend()
+```
+
+# Save results
 
 ```{r write_sce}
 saveRDS(sce, path_sce_output)
+```
+
+```{r write_markers}
+saveRDS(markers, path_markers_output)
 ```
 
 # Session info

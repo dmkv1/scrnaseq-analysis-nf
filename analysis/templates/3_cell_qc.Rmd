@@ -1,11 +1,8 @@
 ---
 title: "`r params$sample_id` - cell QC"
-output:
-  html_notebook:
-    code_folding: hide
 params:
   sample_id: "P009_DG"
-  path_sce_input: "P009_DG_singlets.sce"
+  path_sce_input: "../results/P009_DG/2_doublets/P009_DG_singlets.sce"
   path_sce_output: "test_sce.rds"
   nUMI_thresh: 600
   nGenes_thresh: 300
