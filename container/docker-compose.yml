@@ -10,6 +10,6 @@ services:
       - USERID=1004
     volumes:
       - type: "bind"
-        source: "/home/dmitryk/Projects/MCL-PhanthomMenace"
-        target: "/home/dmitryk/Projects/MCL-PhanthomMenace"
+        source: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace"
+        target: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace"
     restart: always
