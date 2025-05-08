@@ -1,0 +1,104 @@
+---
+title: "Integration"
+params:
+  seed: 42
+  sample_files: NULL
+  path_sce_output: "integrated_samples.sce"
+  path_markers_output: "markers.sce"
+---
+
+```{r setup}
+seed <- params$seed
+set.seed(seed)
+
+# Load the libraries
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(Seurat)
+  library(tidyverse)
+  library(patchwork)
+  library(ggridges)
+})
+
+# Function to get file paths, works in both Nextflow and RStudio
+get_sce_files <- function(sample_files) {
+  if (is.character(sample_files) &&
+      length(sample_files) == 1 && sample_files == "sces") {
+    # Nextflow mode - 'sces' is a directory containing the SCE files
+    return(list.files(
+      path = ".",
+      pattern = "\\.sce$",
+      full.names = TRUE
+    ))
+  } else if (is.character(sample_files) &&
+             length(sample_files) > 1) {
+    # Manual RStudio mode with vector of file paths
+    return(sample_files)
+  } else {
+    stop("Invalid sample_files parameter")
+  }
+}
+```
+
+# Read the sce files
+
+```{r load_sces}
+if (is.null(params$sample_files)) {
+  # Set the sample files manually for interactive use
+  # Replace these paths with your actual SCE file paths
+  sce_files <- c(
+    "../results/P009_DG/3_cellQC/P009_DG_cells.sce",
+    "../results/P009_REL/3_cellQC/P009_REL_cells.sce",
+    "../results/P022_DG/3_cellQC/P022_DG_cells.sce",
+    "../results/P022_REL/3_cellQC/P022_REL_cells.sce",
+    "../results/P027_DG/3_cellQC/P027_DG_cells.sce",
+    "../results/P027_REL/3_cellQC/P027_REL_cells.sce",
+    "../results/P087_DG/3_cellQC/P087_DG_cells.sce",
+    "../results/P087_REL/3_cellQC/P087_REL_cells.sce",
+    "../results/P069_DG1/3_cellQC/P069_DG1_cells.sce",
+    "../results/P069_DG2/3_cellQC/P069_DG2_cells.sce",
+    "../results/P069_REL_PBMC/3_cellQC/P069_REL_PBMC_cells.sce",
+    "../results/P069_REL_BM/3_cellQC/P069_REL_BM_cells.sce",
+    "../results/P069_REL_GUT/3_cellQC/P069_REL_GUT_cells.sce"
+  )
+} else {
+  sce_files <- get_sce_files(params$sample_files)
+}
+sce_files
+```
+
+```{r merge_sces}
+sce_list <- list()
+for(sce_file in sce_files){
+  sce <- readRDS(sce_file)
+  # Remove row data so the SCEs could be column-bound
+  rowData(sce)[["scDblFinder.selected"]] <- NULL
+  rowData(sce)[["subsets_Mito"]] <- NULL
+  rowData(sce)[["subsets_Ribo"]] <- NULL
+  rowData(sce)[["vst.variance.standardized"]] <- NULL
+  rowData(sce)[["vst.variable"]] <- NULL
+  
+  sample <- metadata(sce)[["Sample"]]
+  sce_list[[sample]] <- sce
+}
+sce <- do.call(cbind, sce_list)
+sce
+```
+
+
+
+# Save results
+
+```{r write_sce}
+saveRDS(sce, path_sce_output)
+```
+
+# Session info
+
+```{r sessionInfo}
+print(sessionInfo())
+```
+
+```{r gc}
+gc()
+```

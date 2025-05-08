@@ -58,13 +58,13 @@ workflow {
         seed,
     )
 
-//    all_sample_ids = SEURAT_CLUSTERING.out.sce.map { it[0] }.collect()
-//    all_sces = SEURAT_CLUSTERING.out.sce.collect()
-//
-//    INTEGRATION(
-//        file("templates/5_integration.Rmd"),
-//        all_sample_ids,
-//        all_sces,
-//        seed
-//    )
+    all_sample_ids = SEURAT_CLUSTERING.out.sce.map { it[0] }.collect()
+    all_sces = SEURAT_CLUSTERING.out.sce.collect()
+
+    INTEGRATION(
+        file("templates/5_integration.Rmd"),
+        all_sample_ids,
+        all_sces,
+        seed
+    )
 }

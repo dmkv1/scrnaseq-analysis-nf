@@ -42,14 +42,14 @@ process INTEGRATION {
     publishDir "${params.outdir}/integration", mode: 'copy'
 
     input:
-    path('integration.Rmd')
+    path('5_integration.Rmd')
     val(sample_ids)
     path(sces)
     val seed
 
     output:
-    path("integrated_samples.nb.html"), emit: report
-    path("integrated_samples.sce"), emit: sce
+    path("integration.nb.html"), emit: report
+    path("integrated.sce"), emit: sce
 
     script:
     """
@@ -61,7 +61,36 @@ process INTEGRATION {
                                     toc_float = TRUE),
                 params = list(
                     sample_files = 'sces',
-                    output_file = 'integrated_samples.sce',
+                    output_file = 'integrated.sce',
+                    seed = ${seed}
+                    ))"
+    """
+}
+
+process ANNOTATION {
+    publishDir "${params.outdir}/annotation", mode: 'copy'
+
+    input:
+    path('6_annotation.Rmd')
+    val(sample_ids)
+    path(sces)
+    val seed
+
+    output:
+    path("annotation.nb.html"), emit: report
+    path("annotated.sce"), emit: sce
+
+    script:
+    """
+    Rscript -e "rmarkdown::render('5_integration.Rmd',
+                output_file = 'integrated_samples.nb.html',
+                output_format = 'html_notebook',
+                output_options = list(code_folding = 'hide',
+                                    toc = TRUE,
+                                    toc_float = TRUE),
+                params = list(
+                    input_file = 'integrated.sce',
+                    output_file = 'annotated.sce',
                     seed = ${seed}
                     ))"
     """
