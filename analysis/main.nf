@@ -2,13 +2,14 @@
 
 nextflow.enable.dsl = 2
 
-// Droplet processing
+// Processing by sample
 include { DROPLETS_TO_CELLS } from './modules/qc'
 include { DOUBLET_DETECTION } from './modules/qc'
 include { CELL_QC } from './modules/qc'
-// Analysis
 include { SEURAT_CLUSTERING } from './modules/analysis'
-include { INTEGRATION } from './modules/analysis'
+// Merged analysis
+include { MERGE } from './modules/analysis'
+include { ANNOTATE } from './modules/analysis'
 
 workflow {
     seed = Channel.value(params.seed)
@@ -58,13 +59,14 @@ workflow {
         seed,
     )
 
-    all_sample_ids = SEURAT_CLUSTERING.out.sce.map { it[0] }.collect()
-    all_sces = SEURAT_CLUSTERING.out.sce.collect()
+    MERGE(
+        SEURAT_CLUSTERING.out.sce.collect(),
+        seed
+    )
 
-    INTEGRATION(
-        file("templates/5_integration.Rmd"),
-        all_sample_ids,
-        all_sces,
+    ANNOTATE(
+        file("templates/5_annotation.Rmd"),
+        MERGE.out.merged_sce,
         seed
     )
 }

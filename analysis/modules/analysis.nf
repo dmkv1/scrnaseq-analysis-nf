@@ -8,9 +8,9 @@ process SEURAT_CLUSTERING {
     val seed
 
     output:
-    tuple val(sample_id), path("${sample_id}_seurat_clustering.nb.html"), emit: report
-    tuple val(sample_id), path("${sample_id}.sce"), emit: sce
-    tuple val(sample_id), path("${sample_id}_markers.rds"), emit: markers
+    path("${sample_id}_seurat_clustering.nb.html"), emit: report
+    path("${sample_id}.sce"), emit: sce
+    path("${sample_id}_markers.rds"), emit: markers
 
     script:
     """
@@ -38,58 +38,44 @@ process SEURAT_CLUSTERING {
     """
 }
 
-process INTEGRATION {
-    publishDir "${params.outdir}/integration", mode: 'copy'
+process MERGE {
+    publishDir "${params.outdir}", mode: 'copy'
 
     input:
-    path('5_integration.Rmd')
-    val(sample_ids)
-    path(sces)
+    path qc_passed_sces
     val seed
 
     output:
-    path("integration.nb.html"), emit: report
-    path("integrated.sce"), emit: sce
+    path 'merged.sce', emit: merged_sce
 
     script:
     """
-    Rscript -e "rmarkdown::render('5_integration.Rmd',
-                output_file = 'integrated_samples.nb.html',
-                output_format = 'html_notebook',
-                output_options = list(code_folding = 'hide',
-                                    toc = TRUE,
-                                    toc_float = TRUE),
-                params = list(
-                    sample_files = 'sces',
-                    output_file = 'integrated.sce',
-                    seed = ${seed}
-                    ))"
+    merge.R '${qc_passed_sces.join(',')}' merged.sce
     """
 }
 
-process ANNOTATION {
+process ANNOTATE {
     publishDir "${params.outdir}/annotation", mode: 'copy'
 
     input:
-    path('6_annotation.Rmd')
-    val(sample_ids)
-    path(sces)
+    path('5_annotation.Rmd')
+    path merged_sce
     val seed
 
     output:
     path("annotation.nb.html"), emit: report
-    path("annotated.sce"), emit: sce
+    path("annotated.sce"), emit: annotated_sce
 
     script:
     """
-    Rscript -e "rmarkdown::render('5_integration.Rmd',
-                output_file = 'integrated_samples.nb.html',
+    Rscript -e "rmarkdown::render('5_annotation.Rmd',
+                output_file = 'annotation.nb.html',
                 output_format = 'html_notebook',
                 output_options = list(code_folding = 'hide',
                                     toc = TRUE,
                                     toc_float = TRUE),
                 params = list(
-                    input_file = 'integrated.sce',
+                    input_file = '${merged_sce}',
                     output_file = 'annotated.sce',
                     seed = ${seed}
                     ))"
