@@ -198,6 +198,23 @@ sce <- process_sce(
 )
 ```
 
+# Inspect cells by sample
+
+```{r UMAP_sample, fig.width=10, fig.height=10}
+plotUMAP(sce,
+         color_by = "Sample", other_fields = "Sample") +
+  facet_wrap(
+    ~ Sample
+  )
+```
+
+```{r}
+colData(sce) %>% 
+  as.data.frame() %>% 
+  group_by(Sample) %>% 
+  reframe(cells = n())
+```
+
 ## Cell cycle scoring
 
 If cell cycle effects are not addressed, later when annotating the normal cells, cycling T cells would form a cluster.
