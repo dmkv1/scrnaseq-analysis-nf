@@ -2,7 +2,7 @@ tmp
 *.log
 *.tar
 
-.Rproj
+*.Rproj
 .Rproj.user/
 *.rds
 *.RData
