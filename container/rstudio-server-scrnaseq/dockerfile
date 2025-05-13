@@ -66,3 +66,6 @@ RUN Rscript -e 'install.packages("irlba")'
 
 # Faster marker detection in Seurat
 RUN Rscript -e 'devtools::install_github("immunogenomics/presto")'
+
+# Arguments in RScripts
+RUN Rscript -e 'install.packages("optparse")'
