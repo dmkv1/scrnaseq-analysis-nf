@@ -1,12 +1,12 @@
 ---
 title: "`r params$sample_id` - cell QC"
 params:
-  sample_id: "P009_DG"
-  path_sce_input: "../results/P009_DG/2_doublets/P009_DG_singlets.sce"
+  sample_id: "P069_REL_GUT"
+  path_sce_input: "../results/QC/P069_REL_GUT/2_doublets/P069_REL_GUT_singlets.sce"
   path_sce_output: "test_sce.rds"
-  nUMI_thresh: 600
+  nUMI_thresh: 1000
   nGenes_thresh: 300
-  mitochondrial_thresh: 10
+  mito_thresh: 20
   cluster_discard_thresh: 0.33
   seed: 42
 ---
@@ -17,7 +17,7 @@ path_sce_input <- params$path_sce_input
 path_sce_output <- params$path_sce_output
 nUMI_thresh <- as.numeric(params$nUMI_thresh)
 nGenes_thresh <- as.numeric(params$nGenes_thresh)
-mitochondrial_thresh <- as.numeric(params$mitochondrial_thresh)
+mito_thresh <- as.numeric(params$mito_thresh)
 cluster_discard_thresh <- as.numeric(params$cluster_discard_thresh)
 
 seed <- params$seed
@@ -35,20 +35,8 @@ suppressPackageStartupMessages({
 })
 
 # QC plots function
-QC_plots <- function(sce, color_groups, nUMI_thresh, nGenes_thresh, mitochondrial_thresh) {
-  scater::plotColData(sce, y = "sum", color_by = color_groups) + scale_y_continuous(trans = "log10") +
-    geom_hline(yintercept = nUMI_thresh, linetype = "dashed") +
-    labs(y = "UMIs per cell, log10") +
-    
-    scater::plotColData(sce, y = "detected", color_by = color_groups) + scale_y_continuous(trans = "log10") +
-    geom_hline(yintercept = nGenes_thresh, linetype = "dashed") +
-    labs(y = "Genes per cell, log10") +
-    
-    scater::plotColData(sce, y = "subsets_Mito_percent", color_by = color_groups) + scale_y_continuous(limits = c(0, 100)) +
-    geom_hline(yintercept = mitochondrial_thresh, linetype = "dashed") +
-    labs(y = "% mitochondrial genes") +
-    
-    scater::plotColData(sce, y = "libComplexity", color_by = color_groups) +
+QC_plots <- function(sce, color_groups, nUMI_thresh, nGenes_thresh, mito_thresh) {
+  scater::plotColData(sce, y = "libComplexity", color_by = color_groups) +
     labs(y = "log10(nGenes) / log10(nUMIs)") +
     
     scater::plotColData(sce, y = "subsets_Ribo_percent", color_by = color_groups) + scale_y_continuous(limits = c(0, 100)) +
@@ -89,19 +77,14 @@ QC_plots <- function(sce, color_groups, nUMI_thresh, nGenes_thresh, mitochondria
 
 ```{r load_sce}
 sce <- readRDS(path_sce_input)
-sce
-```
-
 # Remove doublets detected in the previous step
-
-```{r remove_doublets}
 sce <- sce[, sce$scDblFinder.class == "singlet"]
 sce
 ```
 
-# Add QC metrics
+# QC metrics
 
-```{r add_QC_metrics}
+```{r add_QC_metrics, fig.width=11.2, fig.height=7}
 QC.genes <- list(
     Mito = stringr::str_which(rowData(sce)[["Symbol"]], "^MT-"),
     Ribo = stringr::str_which(rowData(sce)[["Symbol"]], "^RPL")
@@ -114,50 +97,83 @@ sce$Mito_Ribo_Ratio <- sce$subsets_Mito_percent / (sce$subsets_Mito_percent + sc
 
 sce$discard <- sce$sum < nUMI_thresh |
   sce$detected < nGenes_thresh |
-  sce$subsets_Mito_percent > mitochondrial_thresh
+  sce$subsets_Mito_percent > mito_thresh
 
-sce
+color_groups = "discard"
+
+scater::plotColData(sce, y = "sum", color_by = color_groups) + 
+  scale_y_continuous(trans = "log10") +
+  geom_hline(yintercept = nUMI_thresh, linetype = "dashed") +
+  theme(legend.position = "none") +
+  labs(y = "UMIs per cell, log10",
+       title = paste("nUMI threshold:", nUMI_thresh)) +
+  
+  scater::plotColData(sce, y = "detected", color_by = color_groups) + scale_y_continuous(trans = "log10") +
+  geom_hline(yintercept = nGenes_thresh, linetype = "dashed") +
+  theme(legend.position = "none") +
+  labs(y = "Genes per cell, log10",
+       title = paste("nGenes threshold:", nGenes_thresh)) +
+  
+  scater::plotColData(sce, y = "subsets_Mito_percent", color_by = color_groups) +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, by = 5)) +
+  geom_hline(yintercept = mito_thresh, linetype = "dashed") +
+  labs(y = "% mitochondrial genes",
+       title = paste("% mito threshold:", mito_thresh))
 ```
 
-```{r QC_plots, fig.width=11.2, fig.height=7}
+
+```{r, fig.width=11.2, fig.height=7}
 metrics_QC_discard <- QC_plots(sce,
                                "discard",
                                nUMI_thresh,
                                nGenes_thresh,
-                               mitochondrial_thresh)
+                               mito_thresh)
 metrics_QC_discard
 ```
 
-# Seurat clustering
+```{r}
+colData(sce) %>% 
+  as.data.frame() %>% 
+  mutate(
+    threshold_QC = case_when(
+      discard ~ "Remove",
+      !discard ~ "Pass"
+    )
+  ) %>% 
+  group_by(threshold_QC) %>% 
+  reframe(cells = n())
+```
 
-```{r seurat_clustering}
+# Clustering
+
+```{r clustering, message=FALSE, warning=FALSE}
 rownames(sce) <- rowData(sce)[["Symbol"]]
 
 seurat <- as.Seurat(sce, counts = "counts", data = NULL)
 
 seurat <- NormalizeData(seurat,
                         normalization.method = "LogNormalize",
-                        scale.factor = 10000)
+                        scale.factor = 10000,
+                        verbose = F)
 seurat <- FindVariableFeatures(
   seurat,
   selection.method = "vst",
   loess.span = 0.3,
-  nfeatures = 2000
+  nfeatures = 2000,
+  verbose = F
 )
-seurat <- ScaleData(seurat, model.use = "linear")
-seurat <- RunPCA(seurat)
-seurat <- RunUMAP(seurat, reduction = "pca", dims = 1:20)
+seurat <- ScaleData(seurat, model.use = "linear", verbose = F)
+seurat <- RunPCA(seurat, verbose = F)
+seurat <- RunUMAP(seurat, reduction = "pca", dims = 1:20, verbose = F)
 seurat <- FindNeighbors(
   seurat,
   k.param = c(30),
   reduction = "pca",
-  dims = 1:20
+  dims = 1:20, verbose = F
 )
 seurat <- FindClusters(seurat,
-                       resolution = 0.5)
-```
+                       resolution = 0.5, verbose = F)
 
-```{r transfer_results_to_sce}
 reducedDims(sce)[["UMAP"]] <- Embeddings(seurat, reduction = "umap")
 sce[["clusters"]] <- seurat$seurat_clusters
 ```
@@ -219,15 +235,23 @@ if (length(problematic_clusters) > 0) {
 }
 ```
 
+```{r, fig.width=6.5, fig.height=6}
+plotUMAP(sce, color_by = "discard") +
+  labs(title = "All cells to discard")
+```
+
 ```{r generate_and_store_metrics}
 metrics <- list(
   sample_id = sample_id,
   total_cells = ncol(sce),
+  nUMI_thresh = nUMI_thresh,
+  nGenes_thresh = nGenes_thresh,
+  mito_thresh = mito_thresh,
   qc_cells = sum(!colData(sce)[["discard"]]),
   discard_cells = sum(colData(sce)[["discard"]])
 )
 metrics[["discard_ratio"]] <- round(metrics$discard_cells / metrics$total_cells, 3)
-
+print(metrics)
 writeLines(jsonlite::toJSON(metrics, pretty=TRUE), paste0(sample_id, "_cell_QC_metrics.json"))
 ```
 
@@ -235,12 +259,9 @@ Sample `r metrics$sample_id` has `r metrics$qc_cells` cells which passed QC and 
 
 # Write resulting sce
 
-```{r print_sce}
-sce_clean <- sce[, !colData(sce)$discard]
-sce_clean
-```
-
 ```{r write_sce}
+sce_clean <- sce[, !colData(sce)$discard]
+
 saveRDS(sce_clean, path_sce_output)
 ```
 

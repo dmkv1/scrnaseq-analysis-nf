@@ -72,7 +72,7 @@ process CELL_QC {
 
     input:
     path '3_cell_qc.Rmd'
-    tuple val(sample_id), path(sce)
+    tuple val(sample_id), path(sce), val(nUMI_thresh), val(nGenes_thresh), val(mito_thresh)
     val seed
 
     output:
@@ -92,9 +92,9 @@ process CELL_QC {
                     sample_id = '${sample_id}',
                     path_sce_input = '${sce}',
                     path_sce_output = '${sample_id}.sce',
-                    nUMI_thresh = '${params.qc.nUMI_thresh}',
-                    nGenes_thresh = '${params.qc.nGenes_thresh}',
-                    mitochondrial_thresh = '${params.qc.mitochondrial_thresh}',
+                    nUMI_thresh = '${nUMI_thresh}',
+                    nGenes_thresh = '${nGenes_thresh}',
+                    mito_thresh = '${mito_thresh}',
                     cluster_discard_thresh = '${params.qc.cluster_discard_thresh}',
                     seed = ${seed}
                     ))"
