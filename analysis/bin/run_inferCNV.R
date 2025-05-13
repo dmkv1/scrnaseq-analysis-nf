@@ -1,53 +1,88 @@
 #!/usr/bin/env Rscript
 options(scipen = 100)
 
-args <- commandArgs(trailingOnly = TRUE)
-
-seed <- args[[1]]
-input_sce_file <- args[[2]]
-infercnv_output_path <- args[[3]]
-hg38_gencode <- args[[4]]
-
-seed <- 42
-set.seed(seed)
-
-input_sce_file <- "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/analysis/results/annotation/annotated.sce"
-hg38_gencode <- "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/analysis/tmp/hg38_gencode_v27.txt"
-
-tumor_cells_label <- "MCL"
-reference_label <- "Reference"
-
-k_obs_groups.list <- list(
-  "P009" = 5,
-  "P022" = 2,
-  "P027" = 3,
-  "P069" = 3,
-  "P087" = 6
-)
-
-# Setup SCE
 suppressPackageStartupMessages({
+  library(optparse)
   library(SingleCellExperiment)
   library(tidyverse)
   library(infercnv)
 })
 
+option_list <- list(
+  make_option(
+    c("-i", "--input_sce_file"),
+    type = "character",
+    default = NULL,
+    help = "Input SingleCellExperiment object stored as RDS"
+  ),
+  make_option(
+    c("--patient"),
+    type = "character",
+    default = NULL,
+    help = "Patient ID"
+  ),
+  make_option(
+    c("--tumor_annotation"),
+    type = "character",
+    default = "Tumor cell",
+    help = "How the tumor cells are annotated in the SCE object"
+  ),
+  make_option(
+    c("--tumor_label"),
+    type = "character",
+    default = "Tumor",
+    help = "How to label the tumor cells in the inferCNV object and plots"
+  ),
+  make_option(
+    c("--k_obs_groups"),
+    type = "integer",
+    default = 4,
+    help = "k_obs_groups parameter"
+  ),
+  make_option(
+    c("--hg38_gencode"),
+    type = "character",
+    default = NULL,
+    help = "hg38 gencode reference"
+  ),
+  make_option(
+    c("--seed"),
+    type = "integer",
+    default = 42,
+    help = "Random seed"
+  )
+)
+opt_parser <- OptionParser(option_list = option_list)
+opts <- parse_args(opt_parser)
+
+seed <- opts$seed
+set.seed(seed)
+
+input_sce_file <- opts$input_sce_file
+patient <- opts$patient
+
+tumor_annotation <- opts$tumor_annotation
+tumor_label <- opts$tumor_label
+reference_label <- "Reference"
+
+k_obs_groups <- opts$k_obs_groups
+hg38_gencode <- opts$hg38_gencode
+
+# Setup SCE
 sce <- readRDS(input_sce_file)
-
-sce$infercnv_groups <- colData(sce) %>%
-  as.data.frame() %>%
-  mutate(cell_type_manual = case_when(
-    cell_type_manual == "MCL cell" ~ paste(tumor_cells_label, Timepoint, Compartment, sep = "_"),
-    TRUE ~ reference_label
-  )) %>%
-  pull(cell_type_manual)
-
-
-# Construct inferCNV object grouped by patient
-patient = "P009"
 sample_sce <- sce[, sce$Patient == patient]
 
+sample_sce$infercnv_groups <- colData(sample_sce) %>%
+  as.data.frame() %>%
+  mutate(
+    cell_type_manual = case_when(
+      cell_type_manual == tumor_annotation ~ paste(tumor_label, Timepoint, Compartment, sep = "_"),
+      TRUE ~ reference_label
+    )
+  ) %>%
+  pull(cell_type_manual)
 
+# Construct inferCNV object
 sample_annotations <- data.frame(Barcode = colnames(sample_sce),
                                  Cell_type = sample_sce$infercnv_groups)
 
@@ -76,7 +111,7 @@ inferCNVobj <- infercnv::run(
   cluster_references = FALSE,
   denoise = TRUE,
   
-  k_obs_groups = k_obs_groups.list[[patient]],
+  k_obs_groups = k_obs_groups,
   
   HMM = TRUE,
   HMM_type = 'i6',
@@ -94,9 +129,3 @@ inferCNVobj <- infercnv::run(
   
   num_threads = 16
 )
-
-
-
-
-
-

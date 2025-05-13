@@ -6,21 +6,16 @@ nextflow.enable.dsl = 2
 include { DROPLETS_TO_CELLS } from './modules/qc'
 include { DOUBLET_DETECTION } from './modules/qc'
 include { CELL_QC } from './modules/qc'
-include { SEURAT_CLUSTERING } from './modules/analysis'
 // Merged analysis
 include { MERGE } from './modules/analysis'
 include { ANNOTATE } from './modules/analysis'
+include { INFERCNV } from './modules/analysis'
 
 workflow {
     seed = Channel.value(params.seed)
 
-    // Validate input parameters
-    if (params.input == null) {
-        exit(1, "Input samplesheet not specified!")
-    }
-
-    // Create channel from input samplesheet
-    ch_input = Channel.fromPath(params.input)
+    // Create input channels from metadata sheets
+    ch_samples = Channel.fromPath(params.samples, checkIfExists: true)
         .splitCsv(header: true)
         .map { row ->
             def sample_id = row.sample
@@ -34,10 +29,19 @@ workflow {
             return [sample_id, expected_cells, patient_id, timepoint, compartment, replicate, counts]
         }
 
+    ch_patients= Channel.fromPath(params.patients, checkIfExists: true)
+        .splitCsv(header: true)
+        .map { row ->
+            def patient_id = row.patient
+            def k_obs_groups = row.k_obs_groups.toInteger()
+
+            return [patient_id, k_obs_groups]
+        }
+
     // Execute QC modules
     DROPLETS_TO_CELLS(
         file("templates/1_droplets_to_cells.Rmd"),
-        ch_input,
+        ch_samples,
         seed,
     )
 
@@ -53,20 +57,20 @@ workflow {
         seed,
     )
 
-    SEURAT_CLUSTERING(
-        file("templates/4_seurat_clustering.Rmd"),
-        CELL_QC.out.sce,
-        seed,
-    )
-
     MERGE(
-        SEURAT_CLUSTERING.out.sce.collect(),
+        CELL_QC.out.sce.collect(),
         seed
     )
 
     ANNOTATE(
         file("templates/5_annotation.Rmd"),
         MERGE.out.merged_sce,
+        seed
+    )
+
+    INFERCNV(
+        ch_patients,
+        ANNOTATE.out.annotated_sce,
         seed
     )
 }

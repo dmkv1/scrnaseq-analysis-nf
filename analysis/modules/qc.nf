@@ -1,6 +1,6 @@
 process DROPLETS_TO_CELLS {
     tag "${sample_id}"
-    publishDir "${params.outdir}/${sample_id}/1_droplets", mode: 'copy'
+    publishDir "${params.outdir}/QC/${sample_id}/1_droplets", mode: 'copy'
 
     input:
     path '1_droplets_to_cells.Rmd'
@@ -37,7 +37,7 @@ process DROPLETS_TO_CELLS {
 
 process DOUBLET_DETECTION {
     tag "${sample_id}"
-    publishDir "${params.outdir}/${sample_id}/2_doublets", mode: 'copy'
+    publishDir "${params.outdir}/QC/${sample_id}/2_doublets", mode: 'copy'
 
     input:
     path '2_doublets.Rmd'
@@ -68,7 +68,7 @@ process DOUBLET_DETECTION {
 
 process CELL_QC {
     tag "${sample_id}"
-    publishDir "${params.outdir}/${sample_id}/3_cellQC", mode: 'copy'
+    publishDir "${params.outdir}/QC/${sample_id}/3_cellQC", mode: 'copy'
 
     input:
     path '3_cell_qc.Rmd'

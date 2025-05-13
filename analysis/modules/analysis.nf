@@ -1,45 +1,5 @@
-process SEURAT_CLUSTERING {
-    tag "${sample_id}"
-    publishDir "${params.outdir}/${sample_id}", mode: 'copy'
-
-    input:
-    path('seurat_clustering.Rmd')
-    tuple val(sample_id), path(sce)
-    val seed
-
-    output:
-    path("${sample_id}_seurat_clustering.nb.html"), emit: report
-    path("${sample_id}.sce"), emit: sce
-    path("${sample_id}_markers.rds"), emit: markers
-
-    script:
-    """
-    Rscript -e "rmarkdown::render('seurat_clustering.Rmd',
-                output_file = '${sample_id}_seurat_clustering.nb.html',
-                output_format = 'html_notebook',
-                output_options = list(code_folding = 'hide',
-                                    toc = TRUE,
-                                    toc_float = TRUE),
-                params = list(
-                    sample_id = '${sample_id}',
-                    path_sce_input = '${sce}',
-                    path_sce_output = '${sample_id}.sce',
-                    path_markers_output = '${sample_id}_markers.rds',
-                    FindVariableFeatures_nfeatures = '${params.clustering.FindVariableFeatures_nfeatures}',
-                    RunPCA_npcs = '${params.clustering.RunPCA_npcs}',
-                    PCA_variance_threshold = '${params.clustering.PCA_variance_threshold}',
-                    FindNeighbors_knn = '${params.clustering.FindNeighbors_knn}',
-                    FindClusters_res = '${params.clustering.FindClusters_res}',
-                    markers_logfc_thresh = '${params.clustering.markers_logfc_thresh}',
-                    markers_min_pct = '${params.clustering.markers_min_pct}',
-                    markers_test_use = '${params.clustering.markers_test_use}',
-                    seed = ${seed}
-                    ))"
-    """
-}
-
 process MERGE {
-    publishDir "${params.outdir}", mode: 'copy'
+    publishDir "${params.outdir}/SCE", mode: 'copy'
 
     input:
     path qc_passed_sces
@@ -55,7 +15,7 @@ process MERGE {
 }
 
 process ANNOTATE {
-    publishDir "${params.outdir}/annotation", mode: 'copy'
+    publishDir "${params.outdir}/SCE", mode: 'copy'
 
     input:
     path('5_annotation.Rmd')
@@ -79,5 +39,28 @@ process ANNOTATE {
                     output_file = 'annotated.sce',
                     seed = ${seed}
                     ))"
+    """
+}
+
+process INFERCNV {
+    tag "${patient_id}"
+    publishDir "${params.outdir}/inferCNV/${patient_id}", mode: 'copy'
+
+    input:
+    tuple val(patient_id), val(k_obs_groups)
+    path annotated_sce
+    val seed
+
+    output:
+    path("infercnv.png"), emit: infercnv_plot
+
+    script:
+    """
+    Rscript run_inferCNV.R \
+        -i '${annotated_sce}' \
+        --patient '${patient_id}' \
+        --k_obs_groups '${k_obs_groups}' \
+        --hg38_gencode '${params.inferCNV.hg38_gencode}'\
+        --seed ${seed}
     """
 }
