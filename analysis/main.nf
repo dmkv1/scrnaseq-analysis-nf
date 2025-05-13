@@ -58,8 +58,7 @@ workflow {
     )
 
     MERGE(
-        CELL_QC.out.sce.collect(),
-        seed
+        CELL_QC.out.sce.collect()
     )
 
     ANNOTATE(

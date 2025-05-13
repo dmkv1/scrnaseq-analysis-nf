@@ -3,7 +3,6 @@ process MERGE {
 
     input:
     path qc_passed_sces
-    val seed
 
     output:
     path 'merged.sce', emit: merged_sce
