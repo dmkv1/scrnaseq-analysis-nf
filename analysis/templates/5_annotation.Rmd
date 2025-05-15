@@ -2,7 +2,7 @@
 title: "Cell type annotation"
 params:
   seed: 42
-  input_file: "../results/merged.sce"
+  input_file: "../results/SCE/merged.sce"
   output_file: "annotated.sce"
 ---
 
@@ -35,6 +35,42 @@ sce <- readRDS(path_sce_input)
 sce
 ```
 
+```{r}
+colData(sce) %>% 
+  as.data.frame() %>% 
+  group_by(Sample) %>% 
+  reframe(cells = n())
+```
+
+```{r, fig.width=10, fig.height=7.5}
+plotColData(sce, y = "sum",
+                    x = "Sample",
+                    color_by = "Compartment"
+                    ) + 
+  scale_y_continuous(trans = "log10") +
+  theme(axis.text.x = element_blank()) +
+  labs(y = "UMIs per cell, log10") + 
+  
+  plotColData(sce, y = "detected",
+                    x = "Sample",
+                    color_by = "Compartment"
+                    ) + 
+  scale_y_continuous(trans = "log10") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(axis.text.x = element_blank()) +
+  labs(y = "nGenes per cell, log10") +
+  
+  plotColData(sce, y = "Mito_Ribo_Ratio",
+                    x = "Sample",
+                    color_by = "Compartment"
+                    ) + 
+  scale_y_continuous(trans = "pseudo_log") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(y = "%Mito/%Ribo ratio, log10") +
+  
+  plot_layout(ncol = 1)
+```
+
 # Seurat processing function
 
 ```{r processing_function}
@@ -42,10 +78,13 @@ process_sce <- function(sce,
                         HVG_fdr_threshold = 0.1,
                         exclude_HVGs = NULL,
                         vars_to_regress = NULL,
-                        RunPCA_npcs = 30,
-                        pca_variance_threshold = 2.5,
-                        FindNeighbors_knn = 30,
-                        FindClusters_res = 0.5,
+                        RunPCA_npcs = 40,
+                        pca_variance_threshold = 2,
+                        UMAP_min_dist = 0.3,
+                        UMAP_n_neighbors = 30,
+                        FindNeighbors_knn = 20,
+                        FindClusters_res = c(0.1, 0.2, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6),
+                        seed = 42,
                         return_obj = "sce") {
   if (!(return_obj %in% c("sce", "seurat"))) {
     stop("process_sce supports only these types of return_obj: sce, seurat")
@@ -65,7 +104,7 @@ process_sce <- function(sce,
   variance_decomposition <- modelGeneVar(sce)
   top_HVG <- getTopHVGs(variance_decomposition, fdr.threshold = HVG_fdr_threshold)
   
-  if(!is.null(exclude_HVGs)){
+  if (!is.null(exclude_HVGs)) {
     top_HVG <- top_HVG[!top_HVG %in% exclude_HVGs]
   }
   
@@ -97,11 +136,7 @@ process_sce <- function(sce,
   if (is.null(vars_to_regress)) {
     seurat <- ScaleData(seurat, model.use = "linear")
   } else {
-    seurat <- ScaleData(
-      seurat,
-      model.use = "linear",
-      vars.to.regress = vars_to_regress
-    )
+    seurat <- ScaleData(seurat, model.use = "linear", vars.to.regress = vars_to_regress)
   }
   
   seurat <- RunPCA(seurat, seed.use = seed, npcs = RunPCA_npcs)
@@ -139,7 +174,13 @@ process_sce <- function(sce,
     ) +
     theme_minimal()
   
-  seurat <- RunUMAP(seurat, reduction = "pca", dims = 1:chosen_pcs)
+  seurat <- RunUMAP(
+    seurat,
+    reduction = "pca",
+    dims = 1:chosen_pcs,
+    min.dist = UMAP_min_dist,
+    n.neighbors = UMAP_n_neighbors
+  )
   
   seurat <- FindNeighbors(
     seurat,
@@ -147,7 +188,13 @@ process_sce <- function(sce,
     reduction = "pca",
     dims = 1:chosen_pcs
   )
-  seurat <- FindClusters(seurat, resolution = FindClusters_res)
+  
+  seurat <- FindClusters(
+    seurat,
+    algorithm = 4,
+    resolution = FindClusters_res,
+    random.seed = seed
+  )
   
   # Add data back to SCE
   # Normalization
@@ -172,7 +219,13 @@ process_sce <- function(sce,
   reducedDims(sce)[["UMAP"]] <- Embeddings(seurat, reduction = "umap")
   
   # clusters
-  sce[["clusters"]] <- seurat$seurat_clusters
+  cluster_colnames <- grep("^originalexp_snn_res", colnames(seurat@meta.data), value = TRUE)
+  for (cluster_colname in cluster_colnames) {
+    snn_res <- word(cluster_colname, 2, sep = "res\\.")
+    snn_res <- paste0("clusters_res_", snn_res)
+    
+    sce[[snn_res]] <- seurat[[cluster_colname]][[cluster_colname]]
+  }
   
   print(HVG_plot)
   print(PCA_variance_plot)
@@ -190,29 +243,62 @@ process_sce <- function(sce,
 ```{r process_sce}
 sce <- process_sce(
   sce,
-  RunPCA_npcs = 30,
-  pca_variance_threshold = 2.5,
-  FindNeighbors_knn = 20,
-  FindClusters_res = 0.2,
+  pca_variance_threshold = 2,
+  UMAP_n_neighbors = 50,
+  UMAP_min_dist = 0.4,
+  seed = seed,
   return_obj = "sce"
 )
 ```
 
+## Choose cluster resolution
+
+```{r, fig.width=8, fig.height=7}
+cluster_cols <- grep("^clusters_res", colnames(sce@colData), value = TRUE)
+
+cluster_plots <- list()
+for (cluster_col in cluster_cols) {
+  cluster_plots[[cluster_col]] <- plotUMAP(sce, color_by = cluster_col, text_by = cluster_col) +
+    labs(title = cluster_col)
+}
+cluster_plots
+```
+
+```{r, fig.width=10, fig.height=5}
+plotUMAP(sce,
+         color_by = "MS4A1") +
+  plotUMAP(sce,
+         color_by = "CCND1")
+```
+
+```{r UMAP_clusters, fig.width=8, fig.height=7}
+sce[["clusters"]] <- sce[["clusters_res_0.4"]]
+plotUMAP(sce,
+         color_by = "clusters",
+         text_by = "clusters")
+```
+
 # Inspect cells by sample
 
-```{r UMAP_sample, fig.width=10, fig.height=10}
+```{r, fig.width=6, fig.height=5}
+plotUMAP(sce,
+         color_by = "Sample")
+```
+
+```{r, fig.width=10.5, fig.height=5}
+plotUMAP(sce,
+         color_by = "Patient",
+         other_fields = "Timepoint") +
+  facet_wrap(~ Timepoint) +
+  theme_bw()
+```
+
+```{r, fig.width=10, fig.height=10}
 plotUMAP(sce,
          color_by = "Sample", other_fields = "Sample") +
   facet_wrap(
     ~ Sample
   )
-```
-
-```{r}
-colData(sce) %>% 
-  as.data.frame() %>% 
-  group_by(Sample) %>% 
-  reframe(cells = n())
 ```
 
 ## Cell cycle scoring
@@ -294,22 +380,9 @@ ggcells(sce,
            )
 ```
 
-```{r UMAP_phase, fig.width=6, fig.height=5}
+```{r, fig.width=6, fig.height=5}
 plotUMAP(sce,
          color_by = "tricyclePhase")
-```
-
-```{r UMAP_sample, fig.width=6, fig.height=5}
-plotUMAP(sce,
-         color_by = "Sample")
-```
-
-```{r UMAP_timepoint, fig.width=10.5, fig.height=5}
-plotUMAP(sce,
-         color_by = "Patient",
-         other_fields = "Timepoint") +
-  facet_wrap(~ Timepoint) +
-  theme_bw()
 ```
 
 ## Automatic cell types
@@ -338,13 +411,13 @@ colData(sce) %>%
   arrange(desc(N))
 ```
 
-```{r UMAP_autoref, fig.width=8, fig.height=7}
+```{r, fig.width=8, fig.height=7}
 plotUMAP(sce,
          color_by = "cell_type_main") +
   labs(title = "Cell types")
 ```
 
-```{r UMAP_autoref_PtTp, fig.width=15, fig.height=6}
+```{r, fig.width=15, fig.height=6}
 plotUMAP(sce,
          color_by = "cell_type_main",
          other_fields = c("Patient", "Timepoint")) +
@@ -353,17 +426,9 @@ plotUMAP(sce,
   labs(title = "Cell types")
 ```
 
-## Clusters
-
-```{r UMAP_clusters, fig.width=8, fig.height=7}
-plotUMAP(sce,
-         color_by = "clusters",
-         text_by = "clusters")
-```
-
 ## B cell clusters
 
-```{r UMAPs_locate_Bcells, fig.width=15, fig.height=5}
+```{r, fig.width=15, fig.height=5}
 plotUMAP(sce, color_by = "clusters", text_by = "clusters") +
   labs(title = "Clusters") +
   plotUMAP(sce, color_by = "cell_type_main") +
@@ -374,7 +439,7 @@ plotUMAP(sce, color_by = "clusters", text_by = "clusters") +
 
 ## Label cell clusters
 
-```{r Bcell_clusters}
+```{r}
 cell_type_df <- colData(sce) %>% 
   as.data.frame() %>% 
   remove_rownames() %>% 
@@ -383,8 +448,9 @@ cell_type_df <- colData(sce) %>%
   arrange(clusters) %>% 
   mutate(
     cell_type_manual = case_when(
-      clusters %in% c(0, 4, 1, 10, 6, 7, 5) ~ "B cell",
-      TRUE ~ "Other",
+      clusters %in% c(15) ~ "Other",
+      clusters %in% c(2, 4, 12, 13) ~ "T cell",
+      TRUE ~ "B cell",
     )
   )
 
@@ -398,7 +464,7 @@ data.frame(
   reframe(N = n())
 ```
 
-```{r UMAP_located_Bcells, fig.width=5.5, fig.height=5}
+```{r, fig.width=5.5, fig.height=5}
 plotUMAP(sce, color_by = "cell_type_manual",) +
   labs(title = "Manual annotation 1")
 ```
@@ -407,17 +473,44 @@ plotUMAP(sce, color_by = "cell_type_manual",) +
 
 ```{r process_sce_B_cells, fig.height=6, fig.width=10}
 sce_B <- sce[, sce$cell_type_manual == "B cell"]
+
+cluster_cols <- grep("^clusters_res", colnames(sce_B@colData), value = TRUE)
+for (cluster_col in cluster_cols) {
+  sce_B[[cluster_col]] <- NULL
+}
+
 sce_B <- process_sce(
   sce_B,
   RunPCA_npcs = 30,
-  pca_variance_threshold = 2.5,
-  FindNeighbors_knn = 60,
-  FindClusters_res = 0.1,
+  pca_variance_threshold = 2,
+  FindNeighbors_knn = 30,
+  FindClusters_res = c(0.3, 0.35, 0.4, 0.45, 0.5),
+  seed = seed,
   return_obj = "sce"
 )
 ```
 
-```{r UMAP_locate_tumor, fig.width=15, fig.height=6}
+```{r, fig.width=10, fig.height=5}
+plotUMAP(sce_B,
+         color_by = "MS4A1") +
+  plotUMAP(sce_B,
+         color_by = "CCND1")
+```
+
+```{r, fig.width=8, fig.height=7}
+cluster_cols <- grep("^clusters_res", colnames(sce_B@colData), value = TRUE)
+
+cluster_plots <- list()
+for (cluster_col in cluster_cols) {
+  cluster_plots[[cluster_col]] <- plotUMAP(sce_B, color_by = cluster_col, text_by = cluster_col) +
+    labs(title = cluster_col)
+}
+cluster_plots
+```
+
+```{r, fig.width=15, fig.height=6}
+sce_B[["clusters"]] <- sce_B[["clusters_res_0.3"]]
+
 plotUMAP(sce_B, color_by = "Sample") +
   theme(legend.position = "bottom") +
   labs(title = "Sample") +
@@ -429,7 +522,7 @@ plotUMAP(sce_B, color_by = "Sample") +
   labs(title = "Cyclin D1")
 ```
 
-```{r UMAP_Bcells_PtTp, fig.width=15, fig.height=6}
+```{r, fig.width=15, fig.height=6}
 plotUMAP(sce_B,
          color_by = "clusters",
          other_fields = c("Patient", "Timepoint")) +
@@ -437,7 +530,7 @@ plotUMAP(sce_B,
   theme_bw()
 ```
 
-```{r tumor_clusters}
+```{r}
 B_cells_df <- colData(sce_B) %>% 
   as.data.frame() %>% 
   remove_rownames() %>% 
@@ -446,7 +539,7 @@ B_cells_df <- colData(sce_B) %>%
   arrange(clusters) %>% 
   mutate(
     cell_type_manual = case_when(
-      clusters %in% c(3) ~ "B cell",
+      clusters %in% c(4, 12) ~ "B cell",
       TRUE ~ "MCL cell"
     )
   )
@@ -461,12 +554,14 @@ data.frame(
   reframe(N = n())
 ```
 
-```{r UMAP_annotated_Bcells, fig.width=8, fig.height=7}
+```{r, fig.width=8, fig.height=7}
 plotUMAP(sce_B, color_by = "cell_type_manual",) +
   labs(title = "Manual annotation for B cells")
 ```
 
-```{r expr_threshold, fig.height=4, fig.width=10}
+## Inspect CCND1 threshold
+
+```{r, fig.height=4, fig.width=10}
 cell.types <- c("MCL cell", "B cell")
 
 CCND1_logcount_threshold <- 0.5
@@ -558,19 +653,275 @@ plotUMAP(sce, color_by = "cell_type_manual") +
   labs(title = "Manual annotation 2")
 ```
 
-# Re-cluster other normal cells
+# Re-cluster T cells
 
-```{r process_sce_normal_cells, fig.height=6, fig.width=10}
-sce_n <- sce[, sce$cell_type_manual == "Other"]
+```{r, fig.height=6, fig.width=10}
+sce_T <- sce[, sce$cell_type_manual == "T cell"]
+
+cluster_cols <- grep("^clusters_res", colnames(sce_T@colData), value = TRUE)
+for (cluster_col in cluster_cols) {
+  sce_T[[cluster_col]] <- NULL
+}
+
+sce_T <- process_sce(
+  sce_T,
+  vars_to_regress = "tricyclePhase",
+  RunPCA_npcs = 30,
+  pca_variance_threshold = 2,
+  seed = seed,
+  return_obj = "sce"
+)
+```
+
+```{r, fig.width=9, fig.height=8}
+plotUMAP(sce_T, color_by = "CD3D") + labs(title = "CD3 Delta - T cells") +
+
+plotUMAP(sce_T, color_by = "CD8A") + labs(title = "CD8+ T cells") +
+
+plotUMAP(sce_T, color_by = "CD4") + labs(title = "CD4+ T cells") +
+
+plotUMAP(sce_T, color_by = "NCR1") + labs(title = "MCR1 - NK cells")
+```
+
+```{r, fig.width=10, fig.height=4.5}
+plotUMAP(sce_T, color_by = "IGKC") +
+  plotUMAP(sce_T, color_by = "IGHM")
+```
+
+
+```{r, fig.width=8, fig.height=7}
+cluster_cols <- grep("^clusters_res", colnames(sce_T@colData), value = TRUE)
+
+cluster_plots <- list()
+for (cluster_col in cluster_cols) {
+  cluster_plots[[cluster_col]] <- plotUMAP(sce_T, color_by = cluster_col, text_by = cluster_col) +
+    labs(title = cluster_col)
+}
+cluster_plots
+```
+
+
+```{r, fig.width=11, fig.height=7}
+sce_T[["clusters"]] <- sce_T[["clusters_res_0.4"]]
+plotUMAP(
+    sce_T,
+    color_by = "clusters",
+    other_fields = "Compartment"
+    ) +
+  theme_bw() +
+  facet_wrap(~ Compartment)
+```
+
+```{r, fig.width=12, fig.height=10}
+plotUMAP(sce_T, color_by = "Sample") +
+  labs(title = "Sample") +
+  
+  plotUMAP(sce_T, color_by = "clusters", text_by = "clusters") +
+  labs(title = "Clusters") +
+  
+  plotUMAP(sce_T, color_by = "cell_type_main") +
+  labs(title = "SingleR cell types") +
+  
+  plotUMAP(sce_T, color_by = "tricyclePhase") +
+  labs(title = "Cell cycle")
+```
+
+## Analyze markers
+
+```{r, warning=FALSE}
+rowData(sce_T)[["Unique_Symbol"]] <- make.unique(rowData(sce_T)[["Symbol"]])
+rownames(sce_T) <- rowData(sce_T)[["Unique_Symbol"]]
+seurat_T <- as.Seurat(sce_T, counts = "counts", data = "logcounts")
+
+Idents(seurat_T) <- seurat_T$clusters
+
+T_cell_clusters = levels(seurat_T$clusters)
+  
+markers_list <- list()
+for(cluster in T_cell_clusters){
+  markers <- FindMarkers(seurat_T, ident.1 = cluster,
+                         test.use = "wilcox",
+                         logfc.threshold = 0.5,
+                         min.pct = 0.1,
+                         only.pos = TRUE)
+  markers_text <- head(markers, n = 40) %>% 
+    rownames() %>% 
+    paste(collapse = ", ")
+  markers_text <- paste0("Cluster ", cluster, ": ", markers_text)
+  markers_list[[as.character(cluster)]] <- markers_text
+}
+text <- paste(markers_list, collapse = "\n\n")
+cat(text)
+```
+
+Cluster 1: Effector/Effector Memory CD8+ T cells
+
+Strong cytotoxic signature (GZMH, GZMB, GZMM, PRF1)
+Clear CD8+ identity (CD8A, CD8B)
+Terminal differentiation markers (KLRG1)
+Effector chemokines (CCL5)
+
+Cluster 2: Naive/Central Memory CD4+ T cells
+
+Characterized by IL7R, LTB, TCF7, LEF1 (naive/memory markers)
+Expression of CD40LG and TNFRSF4 (OX40) typical of CD4+ T cells
+CCR7 expression (key for lymph node homing)
+Abundant ribosomal proteins indicating active protein synthesis
+Lacks cytotoxic markers
+
+Cluster 3: Exhausted/Dysfunctional T cells
+
+Multiple exhaustion markers (HAVCR2/TIM-3, LAG3, PDCD1/PD-1, TIGIT)
+CXCL13 expression typical of exhausted populations
+GZMK expression (characteristic of less differentiated memory CD8+ T cells)
+Likely represents T cells with chronic stimulation
+
+Cluster 4: NK cells
+
+Classic NK markers (NCAM1/CD56, NCR1/NKp46)
+KIR family receptors (KIR2DL3)
+Strong cytotoxic program (GNLY, GZMB, PRF1)
+NK-specific adaptor molecules (TYROBP/DAP12, FCER1G)
+Absence of TCR/CD3 complex genes except CD247 (which is shared with NK receptors)
+
+Cluster 5: Recently Activated CD8+ T cells
+
+Immediate early response genes (DUSP1, DUSP2, JUN family)
+Activation markers (CD69)
+Pro-inflammatory chemokines (CCL3, CCL4)
+Cytotoxic program being initiated (GZMA, GZMK)
+
+Cluster 6: Intestinal CD8+ tissue-resident memory T cells (TRM)
+
+ITGA1 (CD49a): A definitive marker of tissue-resident memory T cells, particularly important for retention in intestinal tissues
+CD8A and cytotoxic machinery (GZMA, GZMH, GZMK): Confirming CD8+ T cell identity with cytolytic potential
+HLA-DRA, HLA-DRB1, CD74: MHC class II expression is observed in gut-resident CD8+ T cells, particularly in inflammatory contexts
+CXCR3: Critical for trafficking and retention of T cells in inflamed intestinal tissues
+ZNF683 (Hobit): Transcription factor specifically associated with tissue residency programming
+CD2, CD3D: Confirming T cell lineage
+
+IGKC and IGHM are contaminants.
+
+Cluster 7: γδ T cells
+
+T cell receptor gamma chain genes (TRGV5, TRGC2, TRGV3, TRGC1)
+NK-like phenotype (multiple KLR receptors)
+Cytotoxic capacity (GZMB, PRF1)
+FCGR3A expression (CD16, typically absent in conventional T cells)
+
+Cluster 8: Cycling T cells
+
+```{r}
+cells_df <- colData(sce_T) %>% 
+  as.data.frame() %>% 
+  remove_rownames() %>% 
+  select(clusters) %>% 
+  distinct() %>% 
+  arrange(clusters) %>% 
+  mutate(
+    cell_type_manual = case_when(
+      clusters == 1 ~ "T cells effector CD8+",
+      clusters == 2 ~ "T cells CD4+",
+      clusters == 3 ~ "T cells exhausted",
+      clusters == 4 ~ "NK cells",
+      clusters == 5 ~ "T cells activated CD8+",
+      clusters == 6 ~ "T cells tissue-resident",
+      clusters == 7 ~ "T cells γδ",
+      clusters == 8 ~ "T cells cycling"
+      
+    )
+  )
+
+cluster_to_cells <- setNames(cells_df$cell_type, cells_df$clusters)
+colData(sce_T)$cell_type_manual <- cluster_to_cells[as.character(colData(sce_T)$clusters)]
+
+data.frame(
+  cell_type_manual = sce_T$cell_type_manual
+) %>% 
+  group_by(cell_type_manual) %>% 
+  reframe(N = n())
+```
+
+```{r fig.width=9, fig.height=7}
+plotUMAP(sce_T, color_by = "cell_type_manual",) +
+  labs(title = "Manual annotation")
+```
+
+```{r fig.width=9, fig.height=7}
+cell_type <- colData(sce_T) %>% 
+  as.data.frame() %>% 
+  rownames_to_column("Barcode_Sample") %>% 
+  dplyr::select("Barcode_Sample", "cell_type" = "cell_type_manual")
+
+all_cell_types <- colData(sce) %>% 
+  as.data.frame() %>% 
+  rownames_to_column("Barcode_Sample") %>% 
+  dplyr::select("Barcode_Sample", "cell_type_manual") %>% 
+  left_join(
+    ., cell_type, by = "Barcode_Sample"
+  ) %>% 
+  mutate(
+    cell_type_manual = case_when(
+      cell_type_manual == "T cell" ~ cell_type,
+      TRUE ~ cell_type_manual
+    ),
+    cell_type = NULL
+  )
+
+sce$cell_type_manual <- all_cell_types$cell_type_manual
+
+plotUMAP(sce, color_by = "cell_type_manual",) +
+  labs(title = "Manual annotation")
+```
+
+# Re-cluster B and other normal cells
+
+```{r, fig.height=6, fig.width=10}
+sce_n <- sce[, sce$cell_type_manual %in% c("B cell", "Other")]
+
+cluster_cols <- grep("^clusters_res", colnames(sce_n@colData), value = TRUE)
+for (cluster_col in cluster_cols) {
+  sce_n[[cluster_col]] <- NULL
+}
+
 sce_n <- process_sce(
   sce_n,
   vars_to_regress = "tricyclePhase",
   RunPCA_npcs = 30,
   pca_variance_threshold = 2.5,
   FindNeighbors_knn = 20,
-  FindClusters_res = 0.3,
+  FindClusters_res = c(0.1, 0.2, 0.5),
+  seed = seed,
   return_obj = "sce"
 )
+```
+
+```{r, fig.width=10, fig.height=4.5}
+plotUMAP(sce_n, color_by = "MS4A1") +
+  plotUMAP(sce_n, color_by = "IGHM")
+```
+
+
+```{r, fig.width=8, fig.height=7}
+cluster_cols <- grep("^clusters_res", colnames(sce_n@colData), value = TRUE)
+
+cluster_plots <- list()
+for (cluster_col in cluster_cols) {
+  cluster_plots[[cluster_col]] <- plotUMAP(sce_n, color_by = cluster_col, text_by = cluster_col) +
+    labs(title = cluster_col)
+}
+cluster_plots
+```
+
+```{r, fig.width=11, fig.height=7}
+sce_n[["clusters"]] <- sce_n[["clusters_res_0.5"]]
+plotUMAP(
+    sce_n,
+    color_by = "clusters",
+    other_fields = "Compartment"
+    ) +
+  theme_bw() +
+  facet_wrap(~ Compartment)
 ```
 
 ```{r UMAPs_leukocytes, fig.width=12, fig.height=10}
@@ -587,162 +938,31 @@ plotUMAP(sce_n, color_by = "Sample") +
   labs(title = "Cell cycle")
 ```
 
-```{r featureUMAP_leukocytes, fig.width=12, fig.height=7}
-plotUMAP(sce_n, color_by = "CD3D") + labs(title = "CD3 Delta - T cells") +
-
-plotUMAP(sce_n, color_by = "CD8A") + labs(title = "CD8+ T cells") +
-
-plotUMAP(sce_n, color_by = "CD4") + labs(title = "CD4+ T cells") +
-
+```{r featureUMAP_leukocytes, fig.width=8, fig.height=4}
 plotUMAP(sce_n, color_by = "FCGR3A") + labs(title = "CD16a - Monocytes") +
 
-plotUMAP(sce_n, color_by = "LYZ") + labs(title = "LYZ - Monocytes") +
-
-plotUMAP(sce_n, color_by = "NCR1") + labs(title = "MCR1 - NK cells")
-```
-
-```{r UMAP_leukocytes_Ct, fig.width=10, fig.height=7}
-plotUMAP(
-    sce_n,
-    color_by = "clusters",
-    other_fields = "Compartment"
-    ) +
-  facet_wrap(~ Compartment)
+plotUMAP(sce_n, color_by = "LYZ") + labs(title = "LYZ - Monocytes")
 ```
 
 ## Analyze markers
 
-```{r sce_to_seurat}
+```{r, warning=FALSE}
 rowData(sce_n)[["Unique_Symbol"]] <- make.unique(rowData(sce_n)[["Symbol"]])
 rownames(sce_n) <- rowData(sce_n)[["Unique_Symbol"]]
 seurat_n <- as.Seurat(sce_n, counts = "counts", data = "logcounts")
 
 Idents(seurat_n) <- seurat_n$clusters
-```
 
-## T cells and NK cells
-
-```{r T_cell_markers}
-T_cell_clusters = c(0, 1, 2, 4, 5, 6, 3)
-markers_list <- list()
-for(cluster in T_cell_clusters){
-  markers <- FindMarkers(seurat_n, ident.1 = cluster,
-                         test.use = "wilcox",
-                         logfc.threshold = 0.1,
-                         min.pct = 0.01,
-                         only.pos = TRUE)
-  markers_text <- head(markers, n = 40) %>% 
-    rownames() %>% 
-    paste(collapse = ", ")
-  markers_text <- paste0("Cluster ", cluster, ": ", markers_text)
-  markers_list[[as.character(cluster)]] <- markers_text
-}
-text <- paste(markers_list, collapse = "\n\n")
-cat(text)
-```
-
-Cluster 0: Effector/Effector Memory CD8+ T cells
-
-Strong cytotoxic signature (GZMH, GZMB, GZMM, PRF1)
-Clear CD8+ identity (CD8A, CD8B)
-Terminal differentiation markers (KLRG1)
-Effector chemokines (CCL5)
-
-Cluster 1: Naive/Central Memory CD4+ T cells
-
-Characterized by IL7R, LTB, TCF7, LEF1 (naive/memory markers)
-Expression of CD40LG and TNFRSF4 (OX40) typical of CD4+ T cells
-CCR7 expression (key for lymph node homing)
-Abundant ribosomal proteins indicating active protein synthesis
-Lacks cytotoxic markers
-
-Cluster 2: Exhausted/Dysfunctional T cells
-
-Multiple exhaustion markers (HAVCR2/TIM-3, LAG3, PDCD1/PD-1, TIGIT)
-CXCL13 expression typical of exhausted populations
-GZMK expression (characteristic of less differentiated memory CD8+ T cells)
-Likely represents T cells with chronic stimulation
-
-Cluster 4: Recently Activated CD8+ T cells
-
-Immediate early response genes (DUSP1, DUSP2, JUN family)
-Activation markers (CD69)
-Pro-inflammatory chemokines (CCL3, CCL4)
-Cytotoxic program being initiated (GZMA, GZMK)
-
-Cluster 5: Intestinal CD8+ tissue-resident memory T cells (TRM)
-
-ITGA1 (CD49a): A definitive marker of tissue-resident memory T cells, particularly important for retention in intestinal tissues
-CD8A and cytotoxic machinery (GZMA, GZMH, GZMK): Confirming CD8+ T cell identity with cytolytic potential
-HLA-DRA, HLA-DRB1, CD74: MHC class II expression is observed in gut-resident CD8+ T cells, particularly in inflammatory contexts
-CXCR3: Critical for trafficking and retention of T cells in inflamed intestinal tissues
-ZNF683 (Hobit): Transcription factor specifically associated with tissue residency programming
-CD2, CD3D: Confirming T cell lineage
-
-Cluster 6: γδ T cells
-
-T cell receptor gamma chain genes (TRGV5, TRGC2, TRGV3, TRGC1)
-NK-like phenotype (multiple KLR receptors)
-Cytotoxic capacity (GZMB, PRF1)
-FCGR3A expression (CD16, typically absent in conventional T cells)
-
-Cluster 3: NK cells
-
-Classic NK markers (NCAM1/CD56, NCR1/NKp46)
-KIR family receptors (KIR2DL3)
-Strong cytotoxic program (GNLY, GZMB, PRF1)
-NK-specific adaptor molecules (TYROBP/DAP12, FCER1G)
-Absence of TCR/CD3 complex genes except CD247 (which is shared with NK receptors)
-
-## Monocytes
-
-```{r monocyte_markers}
-Monocyte_clusters = c(7, 8)
-
-markers_list <- list()
-for(cluster in Monocyte_clusters){
-  markers <- FindMarkers(seurat_n, ident.1 = cluster,
-                         test.use = "wilcox",
-                         logfc.threshold = 0.1,
-                         min.pct = 0.01,
-                         only.pos = TRUE)
-  markers_text <- head(markers, n = 40) %>% 
-    rownames() %>% 
-    paste(collapse = ", ")
-  markers_text <- paste0("Cluster ", cluster, ": ", markers_text)
-  markers_list[[as.character(cluster)]] <- markers_text
-}
-text <- paste(markers_list, collapse = "\n\n")
-cat(text)
-```
-
-Cluster 7: Classical Monocytes (CD14+ CD16-)
-
-Characterized by high expression of FCN1, LYZ, S100A8/9
-Lack of FCGR3A (CD16) expression is defining for this subset
-These typically represent ~80-90% of circulating monocytes
-
-Cluster 8: These are Non-Classical Monocytes (CD14low CD16+)
-
-The FCGR3A expression is a key defining feature
-Expression of macrophage-associated genes (CD68, MAFB, CSF1R)
-Presence of CLEC7A (Dectin-1) and HMOX1
-MS4A7 expression is characteristic of non-classical monocytes
-Higher expression of CDKN1C is typical in CD16+ monocytes
-
-## Other cell types
-
-```{r other_markers}
-clusters = c(9, 10, 11)
+clusters <- levels(Idents(seurat_n))
 
 markers_list <- list()
 for(cluster in clusters){
   markers <- FindMarkers(seurat_n, ident.1 = cluster,
                          test.use = "wilcox",
-                         logfc.threshold = 0.1,
-                         min.pct = 0.01,
+                         logfc.threshold = 0.5,
+                         min.pct = 0.1,
                          only.pos = TRUE)
-  markers_text <- head(markers, n = 40) %>% 
+  markers_text <- head(markers, n = 50) %>% 
     rownames() %>% 
     paste(collapse = ", ")
   markers_text <- paste0("Cluster ", cluster, ": ", markers_text)
@@ -752,31 +972,41 @@ text <- paste(markers_list, collapse = "\n\n")
 cat(text)
 ```
 
-Cluster 9: B-cell Precursors/Progenitors
+Cluster 1: Memory B cells
 
-Strong B-lineage transcription factor signature (TCF4, BCL11A, SOX4, SPIB)
-Proliferation markers (MKI67, PCLAF, TYMS, BIRC5)
-B-cell development genes (TCL1A, IGLL1)
-The "duck foot" UMAP pattern likely represents different stages of B-cell development
-Predominance in bone marrow with limited presence in blood/lymph node confirms early B-cell identity
-Absence in gut is consistent with B-cell development being restricted to primary lymphoid organs
+The high expression of MS4A1 (CD20), immunoglobulin genes (IGKC, IGHG1, IGHG3), and class II MHC molecules (HLA-DRA, HLA-DRB1, etc.) indicates B cells. The presence of IGHG class-switched immunoglobulins, CD27, and B cell receptors (FCRLs) suggests these are memory B cells. CD72, BANK1, and CD22 further support the B cell identity.
 
-Cluster 10: Proliferating CD8+ T cells
+Cluster 2: Naive B cells
 
-Extensive cell cycle signature (MKI67, TOP2A, CENPF, etc.)
-You've confirmed CD3E and CD8A expression, establishing T-cell identity
-Distribution across all tissues suggests these are activated T cells proliferating in response to stimuli
-The cell cycle phase scoring (G1, S, G2/M) confirms these are actively dividing cells
-This represents the proliferative response following T-cell activation
+This cluster shows high expression of ribosomal proteins (RPL/RPS series) indicating active protein synthesis. The B cell markers MS4A1 (CD20), CD79B, IGHM, and FCMR suggest naive B cells. The IGHM (IgM) expression without significant class-switched immunoglobulins supports this annotation.
 
-Cluster 11: Plasma Cells/Plasmablasts
+Cluster 3: IgA-secreting Plasma cells/Plasmablasts
 
-Definitive plasma cell markers (MZB1, TNFRSF17/BCMA, JCHAIN)
-B-cell lineage genes (CD79A, BLNK, POU2AF1)
-Immunoglobulin components (IGLC1, IGHG1)
-Endoplasmic reticulum expansion genes (TXNDC5, DERL3) for antibody production
-Predominantly in bone marrow with some in blood is the typical distribution of plasma cells
-SDC1 (CD138) is a canonical plasma cell marker
+The high expression of IGHA1, IGHA2 (IgA heavy chains) and JCHAIN is characteristic of plasma cells. The expression of TNFRSF13B (TACI) and TNFRSF13C (BAFF-R) is consistent with terminally differentiated B cells. These appear to be IgA-secreting plasma cells or plasmablasts.
+
+Cluster 4: Non-classical Monocytes (CD16+)
+
+This cluster expresses myeloid markers including FCGR3A (CD16), FCER1G, AIF1, TYROBP, CSF1R, LILRB2, CD68, and CLEC7A. The presence of CD16 (FCGR3A) without strong CD14 expression indicates these are non-classical monocytes.
+
+Cluster 5: Classical Monocytes (CD14+)
+
+The expression of CD14, LYZ, S100A8, S100A9, VCAN, and FCN1 is characteristic of classical monocytes. The high levels of S100A8/A9 (calprotectin), CST3, and CTSD further support this annotation.
+
+Cluster 6: Pre-B cells/Immature B cells
+
+The expression of VPREB1, VPREB3, RAG1, and CD38 are hallmarks of early B cell development. The presence of MME (CD10) and TCL1A is consistent with pre-B or immature B cells. IRF4 suggests these cells may be transitioning to the next stage of development.
+
+Cluster 7: Transitional/Naive B cells
+
+This cluster shows markers of maturing B cells including IGHD (IgD), FCER2 (CD23), CD40, and SELL (CD62L). The expression of CCR7 and CXCR4 indicates these are likely transitional B cells moving toward a naive B cell phenotype.
+
+Cluster 8: Proliferating cells
+
+This cluster is characterized by cell cycle and proliferation markers including MKI67 (Ki-67), TOP2A, TYMS, CDK1, cyclins (CCNA2, CCNB2), and mitotic spindle proteins. These are actively dividing cells, likely proliferating B cells based on your sample description.
+
+Cluster 9: Erythroid cells
+
+The expression of hemoglobin genes (HBD, HBA1), erythroid transcription factors (GATA1, TAL1, KLF1), and erythrocyte membrane proteins (GYPA, GYPB, EPB42) clearly identifies these as erythroid lineage cells. The presence of KIT (CD117) suggests they include erythroid progenitors.
 
 ```{r}
 N_cells_df <- colData(sce_n) %>% 
@@ -787,18 +1017,15 @@ N_cells_df <- colData(sce_n) %>%
   arrange(clusters) %>% 
   mutate(
     cell_type_manual = case_when(
-      clusters == 0 ~ "T cells effector CD8+",
-      clusters == 1 ~ "T cells CD4+",
-      clusters == 2 ~ "T cells exhausted",
-      clusters == 3 ~ "NK cells",
-      clusters == 4 ~ "T cells activated CD8+",
-      clusters == 5 ~ "T cells CD8+ intestinal tissue-resident",
-      clusters == 6 ~ "T cells γδ",
-      clusters == 7 ~ "Monocytes classical",
-      clusters == 8 ~ "Monocytes non-classical",
-      clusters == 9 ~ "B-cell progenitors",
-      clusters == 10 ~ "T cells CD8+ proliferating",
-      clusters == 11 ~ "Plasma cells"
+      clusters == 1 ~ "B cell Memory",
+      clusters == 2 ~ "B cell Naive",
+      clusters == 3 ~ "Plasma cells",
+      clusters == 4 ~ "Monocytes Non-classical",
+      clusters == 5 ~ "Monocytes Classical",
+      clusters == 6 ~ "Pre-B cells",
+      clusters == 7 ~ "B cells Transitional/Naive",
+      clusters == 8 ~ "B cells Cycling",
+      clusters == 9 ~ "Erythroid progenitors"
     )
   )
 
@@ -832,7 +1059,7 @@ all_cell_types <- colData(sce) %>%
   ) %>% 
   mutate(
     cell_type_manual = case_when(
-      cell_type_manual == "Other" ~ cell_type,
+      cell_type_manual %in% c("Other", "B cell") ~ cell_type,
       TRUE ~ cell_type_manual
     ),
     cell_type = NULL

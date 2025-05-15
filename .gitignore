@@ -23,3 +23,5 @@ alignment/output
 *.nb.html
 *.png
 *.pdf
+
+analysis/templates/gypsum_cache
