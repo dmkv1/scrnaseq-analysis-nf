@@ -1,27 +1,26 @@
 ---
 title: "`r params$sample_id` - empty drops filtering"
 params:
-  sample_id: "P009_DG"
-  expected_cells: 3500
-  patient_id: "P009"
-  timepoint: "DG"
-  compartment: "PBMC"
-  replicate: "1"
-  counts_dir: "../../alignment/output/P009_DG_PBMC_rep1/P009_DG_PBMC_rep1_Solo.out/Gene/raw"
+  sample_id: "P069_REL_GUT"
+  expected_cells: 10000
+  path_sce_input: NULL
   FDR_thresh: 0.01
   path_sce_output: "test_sce.rds"
   seed: 42
 ---
 
 ```{r setup}
+# Load the libraries
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(DropletUtils)
+  library(ggplot2)
+})
+
 # Import variables
 sample_id <- params$sample_id
 expected_cells <- as.numeric(params$expected_cells)
-patient_id <- params$patient_id
-timepoint <- params$timepoint
-compartment <- params$compartment
-replicate <- params$replicate
-counts_dir <- params$counts_dir
+path_sce_input <- params$path_sce_input
 
 # Thresholds for cell filtering
 UMI_thresh <- as.numeric(params$UMI_thresh)
@@ -31,44 +30,12 @@ path_sce_output <- params$path_sce_output
 
 seed <- params$seed
 set.seed(seed)
-
-# Load the libraries
-suppressPackageStartupMessages({
-  library(SingleCellExperiment)
-  library(DropletUtils)
-  library(ggplot2)
-})
 ```
 
-# Load the counts into an SCE
+# Load the SCE
 
 ```{r load_counts}
-sample_path <- file.path(counts_dir)
-sce_unfiltered <- DropletUtils::read10xCounts(
-  sample_path,
-  sample.names = sample_id,
-  col.names = TRUE
-)
-
-# Add metadata
-metadata(sce_unfiltered)$Sample <- sample_id
-metadata(sce_unfiltered)$Patient <- patient_id
-metadata(sce_unfiltered)$Timepoint <- timepoint
-metadata(sce_unfiltered)$Compartment <- compartment
-metadata(sce_unfiltered)$Replicate <- replicate
-
-# Assign sample column values
-sce_unfiltered[["Patient"]] <- patient_id
-sce_unfiltered[["Timepoint"]] <- timepoint
-sce_unfiltered[["Compartment"]] <- compartment
-sce_unfiltered[["Replicate"]] <- replicate
-
-# Avoid barcode collision
-colnames(sce_unfiltered) <- paste(colData(sce_unfiltered)[["Barcode"]],
-                                  colData(sce_unfiltered)[["Sample"]],
-                                  sep = "-"
-)
-
+sce_unfiltered <- readRDS(path_sce_input)
 sce_unfiltered
 ```
 
@@ -81,14 +48,6 @@ libSizes <- colSums(assays(sce_unfiltered)$counts)
 # Remove droplets that are completely empty
 sce_droplets <- sce_unfiltered[, libSizes > 0]
 sce_droplets
-```
-
-# Write droplets matrix
-
-```{r write_droplets}
-# skipping as this matrix is not used
-
-# saveRDS(sce_droplets, paste0(sample_id, "_droplets.sce"))
 ```
 
 # Knee plot
@@ -193,6 +152,31 @@ sce_cells
 saveRDS(sce_cells, path_sce_output)
 ```
 
+```{r write_filtered_feature_bc_matrix}
+filtered_mtx_dir <- "filtered_feature_bc_matrix"
+dir.create(filtered_mtx_dir, recursive = TRUE)
+
+# 1. Extract and save barcodes
+barcodes <- sce_cells$Barcode
+writeLines(barcodes, file.path(filtered_mtx_dir, "barcodes.tsv"))
+
+# 2. Extract and save genes
+features_df <- as.data.frame(rowData(sce_cells))
+write.table(features_df,
+            file.path(filtered_mtx_dir, "features.tsv"), 
+            row.names = FALSE, col.names = FALSE, 
+            quote = FALSE, sep = "\t")
+
+# 3. Extract and save counts
+counts_matrix <- counts(sce_cells)
+Matrix::writeMM(counts_matrix, file.path(filtered_mtx_dir, "matrix.mtx"))
+
+# gzip
+system(paste0("gzip ", file.path(filtered_mtx_dir, "barcodes.tsv")))
+system(paste0("gzip ", file.path(filtered_mtx_dir, "features.tsv")))
+system(paste0("gzip ", file.path(filtered_mtx_dir, "matrix.mtx")))
+```
+
 # Metrics
 
 ```{r store_metrics}
@@ -205,6 +189,7 @@ metrics <- list(
   n_cells = n_cells,
   cells_ratio = n_cells / n_cell_candidates
 )
+metrics
 writeLines(jsonlite::toJSON(metrics, pretty=TRUE), paste0(sample_id, "_droplet_metrics.json"))
 ```
 

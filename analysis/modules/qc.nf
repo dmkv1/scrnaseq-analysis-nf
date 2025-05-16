@@ -4,12 +4,13 @@ process DROPLETS_TO_CELLS {
 
     input:
     path '1_droplets_to_cells.Rmd'
-    tuple val(sample_id), val(expected_cells), val(patient_id), val(timepoint), val(compartment), val(replicate), path(counts)
+    tuple val(sample_id), path(sce), val(expected_cells)
     val seed
 
     output:
     tuple val(sample_id), path("${sample_id}_droplets_to_cells.nb.html"), emit: report
     tuple val(sample_id), path("${sample_id}_cells.sce"), emit: sce
+    tuple val(sample_id), path('filtered_feature_bc_matrix/'), emit: filtered_fbmtx
     tuple val(sample_id), path("${sample_id}_droplet_metrics.json"), emit: metrics
 
     script:
@@ -22,16 +23,33 @@ process DROPLETS_TO_CELLS {
                                     toc_float = TRUE),
                 params = list(
                                sample_id = '${sample_id}',
+                               path_sce_input = '${sce}',
                                expected_cells = '${expected_cells}',
-                               patient_id = '${patient_id}',
-                               timepoint  = '${timepoint}',
-                               compartment = '${compartment}',
-                               replicate = '${replicate}',
-                               counts_dir = '${counts}',
                                FDR_thresh = '${params.droplets.FDR_thresh}',
                                path_sce_output = '${sample_id}_cells.sce',
                                seed = ${seed}
                              ))"
+    """
+}
+
+process AMBIENT_RNA {
+    tag "${sample_id}"
+
+    input:
+    tuple val(sample_id), path(filtered_mtx_path), path(raw_mtx_path)
+
+    output:
+    tuple val(sample_id), path("${sample_id}/matrix/"), emit: clean_fbmtx
+    tuple val(sample_id), path("${sample_id}/metric.json"), emit: metrics
+
+    script:
+    """
+    gzip ${raw_mtx_path}/*
+
+    CellClear correct_expression \
+        --filtered_mtx_path '${filtered_mtx_path}' \
+        --raw_mtx_path '${raw_mtx_path}' \
+        --output '${sample_id}'
     """
 }
 

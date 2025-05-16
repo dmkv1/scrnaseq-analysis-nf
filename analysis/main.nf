@@ -2,8 +2,11 @@
 
 nextflow.enable.dsl = 2
 
+include { MATRIX_TO_SCE } from './modules/utils'
+include { MATRIX_TO_SCE as CLEAN_MATRIX_TO_SCE } from './modules/utils'
 // Processing by sample
 include { DROPLETS_TO_CELLS } from './modules/qc'
+include { AMBIENT_RNA } from './modules/qc'
 include { DOUBLET_DETECTION } from './modules/qc'
 include { CELL_QC } from './modules/qc'
 // Merged analysis
@@ -15,35 +18,67 @@ workflow {
     seed = Channel.value(params.seed)
 
     // Create input channels from metadata sheets
-    ch_samples = Channel.fromPath(params.samples, checkIfExists: true)
+    ch_input_samples = Channel.fromPath(params.samples, checkIfExists: true)
         .splitCsv(header: true)
         .map { row ->
             def sample_id = row.sample
-            def expected_cells = row.expected_cells.toInteger()
             def patient_id = row.patient
             def timepoint = row.timepoint
             def compartment = row.compartment
             def replicate = row.replicate
-            def counts = file(row.counts)
+            def raw_fbmtx = file(row.raw_feature_bc_matrix)
 
-            return [sample_id, expected_cells, patient_id, timepoint, compartment, replicate, counts]
+            return [sample_id, patient_id, timepoint, compartment, replicate, raw_fbmtx]
         }
 
-    ch_patients = Channel.fromPath(params.patients, checkIfExists: true)
+    ch_metadata = ch_input_samples.map { sample_id, patient_id, timepoint, compartment, replicate, _raw_fbmtx ->
+        return [sample_id, patient_id, timepoint, compartment, replicate]
+    }
+
+    MATRIX_TO_SCE(ch_input_samples)
+
+    ch_droplets = Channel.fromPath(params.samples, checkIfExists: true)
         .splitCsv(header: true)
         .map { row ->
-            def patient_id = row.patient
-            def k_obs_groups = row.k_obs_groups.toInteger()
+            def sample_id = row.sample
+            def expected_cells = row.expected_cells.toInteger()
 
-            return [patient_id, k_obs_groups]
+            return [sample_id, expected_cells]
         }
 
-    // Create QC-specific channel from the same CSV
+    DROPLETS_TO_CELLS(
+        file("templates/1_droplets_to_cells.Rmd"),
+        MATRIX_TO_SCE.out.sce.join(ch_droplets),
+        seed,
+    )
+
+    ch_raw_fbmtx = ch_input_samples.map { sample_id, _patient_id, _timepoint, _compartment, _replicate, raw_fbmtx ->
+        return [sample_id, raw_fbmtx]
+    }
+
+    AMBIENT_RNA(
+        DROPLETS_TO_CELLS.out.filtered_fbmtx.join(ch_raw_fbmtx)
+    )
+
+    ch_clean_fbmtx = AMBIENT_RNA.out.clean_fbmtx
+        .join(ch_metadata)
+        .map { sample_id, clean_fbmtx, patient_id, timepoint, compartment, replicate ->
+            return [sample_id, patient_id, timepoint, compartment, replicate, clean_fbmtx]
+        }
+
+    CLEAN_MATRIX_TO_SCE(ch_clean_fbmtx)
+
+    DOUBLET_DETECTION(
+        file("templates/2_doublets.Rmd"),
+        CLEAN_MATRIX_TO_SCE.out.sce,
+        seed,
+    )
+
     ch_qc_params = Channel.fromPath(params.samples, checkIfExists: true)
         .splitCsv(header: true)
         .map { row ->
             def sample_id = row.sample
-            // Get individual QC parameters with defaults if not specified
+
             def nUMI_thresh = row.containsKey('nUMI_thresh') && row.nUMI_thresh?.trim()
                 ? row.nUMI_thresh.toInteger()
                 : params.qc.nUMI_thresh
@@ -59,19 +94,6 @@ workflow {
             return [sample_id, nUMI_thresh, nGenes_thresh, mito_thresh]
         }
 
-    // Execute QC modules
-    DROPLETS_TO_CELLS(
-        file("templates/1_droplets_to_cells.Rmd"),
-        ch_samples,
-        seed,
-    )
-
-    DOUBLET_DETECTION(
-        file("templates/2_doublets.Rmd"),
-        DROPLETS_TO_CELLS.out.sce,
-        seed,
-    )
-
     CELL_QC(
         file("templates/3_cell_qc.Rmd"),
         DOUBLET_DETECTION.out.sce.join(ch_qc_params),
@@ -82,16 +104,24 @@ workflow {
         CELL_QC.out.sce.collect()
     )
 
-//    ANNOTATE(
-//        file("templates/5_annotation.Rmd"),
-//        MERGE.out.merged_sce,
-//        seed
-//    )
-//
-//    INFERCNV(
-//        ch_patients,
-//        ANNOTATE.out.annotated_sce,
-//        seed
-//    )
-//
+    ANNOTATE(
+        file("templates/5_annotation.Rmd"),
+        MERGE.out.merged_sce,
+        seed,
+    )
+
+    ch_patients = Channel.fromPath(params.patients, checkIfExists: true)
+        .splitCsv(header: true)
+        .map { row ->
+            def patient_id = row.patient
+            def k_obs_groups = row.k_obs_groups.toInteger()
+
+            return [patient_id, k_obs_groups]
+        }
+
+    INFERCNV(
+        ch_patients,
+        ANNOTATE.out.annotated_sce,
+        seed,
+    )
 }
