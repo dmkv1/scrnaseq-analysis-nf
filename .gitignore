@@ -25,3 +25,5 @@ alignment/output
 *.pdf
 
 analysis/templates/gypsum_cache
+
+tests/
