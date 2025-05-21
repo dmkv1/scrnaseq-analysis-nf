@@ -3,7 +3,7 @@ process DROPLETS_TO_CELLS {
     publishDir "${params.outdir}/QC/${sample_id}/1_droplets", mode: 'copy'
 
     input:
-    path '1_droplets_to_cells.Rmd'
+    path 'droplets_to_cells.Rmd'
     tuple val(sample_id), path(sce), val(expected_cells)
     val seed
 
@@ -15,7 +15,7 @@ process DROPLETS_TO_CELLS {
 
     script:
     """
-    Rscript -e "rmarkdown::render('1_droplets_to_cells.Rmd',
+    Rscript -e "rmarkdown::render('droplets_to_cells.Rmd',
                 output_file = '${sample_id}_droplets_to_cells.nb.html',
                 output_format = 'html_notebook',
                 output_options = list(code_folding = 'hide',
@@ -34,31 +34,32 @@ process DROPLETS_TO_CELLS {
 
 process AMBIENT_RNA {
     tag "${sample_id}"
+    publishDir "${params.outdir}/QC/${sample_id}/2_ambientRNA", mode: 'copy'
 
     input:
     tuple val(sample_id), path(filtered_mtx_path), path(raw_mtx_path)
 
     output:
-    tuple val(sample_id), path("${sample_id}/matrix/"), emit: clean_fbmtx
-    tuple val(sample_id), path("${sample_id}/metric.json"), emit: metrics
+    tuple val(sample_id), path("decontX_feature_bc_matrix/"), emit: clean_fbmtx
+    tuple val(sample_id), path("${sample_id}_perCellCont.rds"), emit: perCellCont
 
     script:
     """
-    gzip ${raw_mtx_path}/*
-
-    CellClear correct_expression \
-        --filtered_mtx_path '${filtered_mtx_path}' \
-        --raw_mtx_path '${raw_mtx_path}' \
-        --output '${sample_id}'
+    run_decontX.R \
+        --cells_fbmtx "${filtered_mtx_path}" \
+        --droplets_fbmtx "${raw_mtx_path}" \
+        --use_empty TRUE \
+        --decont_fbmtx "decontX_feature_bc_matrix" \
+        --perCell "${sample_id}_perCellCont.rds"
     """
 }
 
 process DOUBLET_DETECTION {
     tag "${sample_id}"
-    publishDir "${params.outdir}/QC/${sample_id}/2_doublets", mode: 'copy'
+    publishDir "${params.outdir}/QC/${sample_id}/3_doublets", mode: 'copy'
 
     input:
-    path '2_doublets.Rmd'
+    path 'doublets.Rmd'
     tuple val(sample_id), path(sce)
     val seed
 
@@ -69,7 +70,7 @@ process DOUBLET_DETECTION {
 
     script:
     """
-    Rscript -e "rmarkdown::render('2_doublets.Rmd',
+    Rscript -e "rmarkdown::render('doublets.Rmd',
                 output_file = '${sample_id}_doublets.nb.html',
                 output_format = 'html_notebook',
                 output_options = list(code_folding = 'hide',
@@ -86,10 +87,10 @@ process DOUBLET_DETECTION {
 
 process CELL_QC {
     tag "${sample_id}"
-    publishDir "${params.outdir}/QC/${sample_id}/3_cellQC", mode: 'copy'
+    publishDir "${params.outdir}/QC/${sample_id}/4_cellQC", mode: 'copy'
 
     input:
-    path '3_cell_qc.Rmd'
+    path 'cell_qc.Rmd'
     tuple val(sample_id), path(sce), val(nUMI_thresh), val(nGenes_thresh), val(mito_thresh)
     val seed
 
@@ -100,7 +101,7 @@ process CELL_QC {
 
     script:
     """
-    Rscript -e "rmarkdown::render('3_cell_qc.Rmd',
+    Rscript -e "rmarkdown::render('cell_qc.Rmd',
                 output_file = '${sample_id}_cell_QC.nb.html',
                 output_format = 'html_notebook',
                 output_options = list(code_folding = 'hide',

@@ -104,24 +104,26 @@ workflow {
         CELL_QC.out.sce.collect()
     )
 
-    ANNOTATE(
-        file("templates/5_annotation.Rmd"),
-        MERGE.out.merged_sce,
-        seed,
-    )
+    if (params.annotation_ready) {
+        ANNOTATE(
+            file("templates/4_annotation.Rmd"),
+            MERGE.out.merged_sce,
+            seed,
+        )
 
-    ch_patients = Channel.fromPath(params.patients, checkIfExists: true)
-        .splitCsv(header: true)
-        .map { row ->
-            def patient_id = row.patient
-            def k_obs_groups = row.k_obs_groups.toInteger()
+        ch_patients = Channel.fromPath(params.patients, checkIfExists: true)
+            .splitCsv(header: true)
+            .map { row ->
+                def patient_id = row.patient
+                def k_obs_groups = row.k_obs_groups.toInteger()
 
-            return [patient_id, k_obs_groups]
-        }
+                return [patient_id, k_obs_groups]
+            }
 
-    INFERCNV(
-        ch_patients,
-        ANNOTATE.out.annotated_sce,
-        seed,
-    )
+        INFERCNV(
+            ch_patients,
+            ANNOTATE.out.annotated_sce,
+            seed,
+        )
+    }
 }

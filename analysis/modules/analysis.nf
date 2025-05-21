@@ -17,7 +17,7 @@ process ANNOTATE {
     publishDir "${params.outdir}/SCE", mode: 'copy'
 
     input:
-    path('5_annotation.Rmd')
+    path('annotation.Rmd')
     path merged_sce
     val seed
 
@@ -27,7 +27,7 @@ process ANNOTATE {
 
     script:
     """
-    Rscript -e "rmarkdown::render('5_annotation.Rmd',
+    Rscript -e "rmarkdown::render('annotation.Rmd',
                 output_file = 'annotation.nb.html',
                 output_format = 'html_notebook',
                 output_options = list(code_folding = 'hide',

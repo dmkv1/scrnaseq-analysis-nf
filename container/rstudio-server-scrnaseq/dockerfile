@@ -70,8 +70,11 @@ RUN Rscript -e 'devtools::install_github("immunogenomics/presto")'
 # Arguments in RScripts
 RUN Rscript -e 'install.packages("optparse")'
 
-# CellClear - ambient RNA removal
+# Ambient RNA removal tools
+RUN Rscript -e 'BiocManager::install("decontX")'
+
 RUN apt-get update && apt-get install -y python3-pip python3-venv python3-full
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install cellbender
 RUN pip install CellClear
