@@ -18,6 +18,10 @@ sce_list <- lapply(sce_paths, readRDS)
 
 for(i in seq_along(sce_list)){
   sce <- sce_list[[i]]
+  
+  # Avoid barcode collision
+  sce$Sample_Barcode <- paste(sce$Sample, sce$Barcode, sep = "-")
+  colnames(sce) <- sce$Sample_Barcode
 
   # Remove row data so the SCEs could be column-bound
   rowData(sce)[["scDblFinder.selected"]] <- NULL
