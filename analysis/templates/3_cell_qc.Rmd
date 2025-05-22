@@ -2,7 +2,7 @@
 title: "`r params$sample_id` - cell QC"
 params:
   sample_id: "P069_REL_GUT"
-  path_sce_input: "../results/QC/P069_REL_GUT/2_doublets/P069_REL_GUT_singlets.sce"
+  path_sce_input: "../results/QC/P069_REL_GUT/3_doublets/P069_REL_GUT_singlets.sce"
   path_sce_output: "test_sce.rds"
   nUMI_thresh: 1000
   nGenes_thresh: 300

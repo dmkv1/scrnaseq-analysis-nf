@@ -20,7 +20,7 @@ option_list <- list(
     help = "Sample ID"
   ),
   make_option(
-    c("--patient"),
+    c("--patient_id"),
     type = "character",
     default = NULL,
     help = "Patient ID"

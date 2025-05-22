@@ -11,7 +11,7 @@ process MATRIX_TO_SCE {
     """
     matrix_to_sce.R --fbmtx_path '${fbmtx}' \
         --sample_id '${sample_id}' \
-        --patient '${patient_id}' \
+        --patient_id '${patient_id}' \
         --timepoint '${timepoint}' \
         --compartment '${compartment}' \
         --replicate '${replicate}'
