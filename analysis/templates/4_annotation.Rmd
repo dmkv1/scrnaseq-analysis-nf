@@ -4,6 +4,7 @@ params:
   seed: 42
   input_file: "../results/SCE/merged.sce"
   output_file: "annotated.sce"
+  process_fun: "../bin/process_sce.R"
 ---
 
 ```{r setup}
@@ -26,6 +27,9 @@ suppressPackageStartupMessages({
 
 path_sce_input <- params$input_file
 path_sce_output <- params$output_file
+
+process_fun <- params$process_fun
+source(process_fun)
 ```
 
 # Read the sce
@@ -71,182 +75,16 @@ plotColData(sce, y = "sum",
   plot_layout(ncol = 1)
 ```
 
-# Seurat processing function
-
-```{r processing_function}
-process_sce <- function(sce,
-                        HVG_fdr_threshold = 0.1,
-                        exclude_HVGs = NULL,
-                        vars_to_regress = NULL,
-                        RunPCA_npcs = 40,
-                        pca_variance_threshold = 2,
-                        UMAP_min_dist = 0.3,
-                        UMAP_n_neighbors = 30,
-                        FindNeighbors_knn = 20,
-                        FindClusters_res = c(0.1, 0.2, 0.3, 0.35, 0.4, 0.45, 0.5, 0.6),
-                        seed = 42,
-                        return_obj = "sce") {
-  if (!(return_obj %in% c("sce", "seurat"))) {
-    stop("process_sce supports only these types of return_obj: sce, seurat")
-  }
-  
-  set.seed(seed)
-  
-  reducedDims(sce)[["PCA"]] <- NULL
-  reducedDims(sce)[["UMAP"]] <- NULL
-  
-  seurat <- as.Seurat(sce, counts = "counts", data = NULL)
-  seurat <- NormalizeData(seurat,
-                          normalization.method = "LogNormalize",
-                          scale.factor = 10000)
-  assay(sce, "logcounts", withDimnames = FALSE) <- GetAssayData(seurat, layer = "data", assay = "originalexp")
-  
-  variance_decomposition <- modelGeneVar(sce)
-  top_HVG <- getTopHVGs(variance_decomposition, fdr.threshold = HVG_fdr_threshold)
-  
-  if (!is.null(exclude_HVGs)) {
-    top_HVG <- top_HVG[!top_HVG %in% exclude_HVGs]
-  }
-  
-  variance_df <- as.data.frame(variance_decomposition) %>%
-    rownames_to_column("Symbol") %>%
-    left_join(., as.data.frame(rowData(sce)), by = "Symbol") %>%
-    mutate(HVG = case_when(Symbol %in% top_HVG ~ TRUE, TRUE ~ FALSE))
-  
-  HVG_plot <- ggplot(variance_df, aes(x = mean, y = bio, color = HVG)) +
-    scale_color_manual(values = c("black", "red")) +
-    ggrepel::geom_text_repel(
-      data = dplyr::filter(variance_df, bio > 0.75),
-      aes(label = Symbol),
-      min.segment.length = 0,
-      color = "gray30"
-    ) +
-    geom_point(shape = 1) +
-    cowplot::theme_cowplot() +
-    labs(
-      title = "Variance decomposition plot",
-      subtitle = paste0("Detected ", length(top_HVG), " variable genes"),
-      x = "Mean of log-expression",
-      y = "Variance of log-expression",
-      color = "Biological\nvariance"
-    )
-  
-  VariableFeatures(seurat) <- top_HVG
-  
-  if (is.null(vars_to_regress)) {
-    seurat <- ScaleData(seurat, model.use = "linear")
-  } else {
-    seurat <- ScaleData(seurat, model.use = "linear", vars.to.regress = vars_to_regress)
-  }
-  
-  seurat <- RunPCA(seurat, seed.use = seed, npcs = RunPCA_npcs)
-  
-  # Extract variance explained by each PC
-  pca_variance <- (seurat@reductions$pca@stdev)^2
-  percent_var <- 100 * pca_variance / sum(pca_variance)
-  
-  # Choose PCs that explain more than the threshold percentage of variance
-  chosen_pcs <- length(which(percent_var > pca_variance_threshold))
-  
-  # Create a data frame for visualization
-  variance_df <- data.frame(
-    PC = 1:length(percent_var),
-    PercentVariance = percent_var,
-    Selected = ifelse(percent_var > pca_variance_threshold, "Yes", "No")
-  )
-  
-  # Plot the variance explained by each PC
-  PCA_variance_plot <- ggplot(variance_df, aes(x = PC, y = PercentVariance)) +
-    geom_bar(stat = "identity", aes(fill = Selected)) +
-    geom_hline(yintercept = pca_variance_threshold,
-               linetype = "dashed",
-               color = "red") +
-    scale_fill_manual(values = c("No" = "gray", "Yes" = "blue")) +
-    labs(
-      title = paste0(
-        "PCs with >",
-        pca_variance_threshold,
-        "% variance: ",
-        chosen_pcs
-      ),
-      x = "Principal Component",
-      y = "Percent Variance Explained"
-    ) +
-    theme_minimal()
-  
-  seurat <- RunUMAP(
-    seurat,
-    reduction = "pca",
-    dims = 1:chosen_pcs,
-    min.dist = UMAP_min_dist,
-    n.neighbors = UMAP_n_neighbors
-  )
-  
-  seurat <- FindNeighbors(
-    seurat,
-    k.param = FindNeighbors_knn,
-    reduction = "pca",
-    dims = 1:chosen_pcs
-  )
-  
-  seurat <- FindClusters(
-    seurat,
-    algorithm = 4,
-    resolution = FindClusters_res,
-    random.seed = seed
-  )
-  
-  # Add data back to SCE
-  # Normalization
-  assay(sce, "logcounts", withDimnames = FALSE) <- GetAssayData(seurat, layer = "data", assay = "originalexp")
-  
-  # VST
-  rowData_vst <- seurat@assays$originalexp@meta.features
-  if (all(rowData_vst[["ID"]] == rowData(sce)[["ID"]])) {
-    rowData(sce)[["vst.variance.standardized"]] <- rowData_vst[["vst.variance.standardized"]]
-    rowData(sce)[["vst.variable"]] <- rowData_vst[["vst.variable"]]
-  } else {
-    stop("Variable features do not match!")
-  }
-  
-  # PCA
-  reducedDims(sce)[["PCA"]] <- Embeddings(seurat, reduction = "pca")
-  attr(reducedDims(sce)[["PCA"]], "rotation") <- Loadings(seurat, reduction = "pca")
-  pca_variance <- seurat@reductions$pca@stdev^2
-  attr(reducedDims(sce)[["PCA"]], "percentVar") <- pca_variance / sum(pca_variance) * 100
-  
-  # UMAP
-  reducedDims(sce)[["UMAP"]] <- Embeddings(seurat, reduction = "umap")
-  
-  # clusters
-  cluster_colnames <- grep("^originalexp_snn_res", colnames(seurat@meta.data), value = TRUE)
-  for (cluster_colname in cluster_colnames) {
-    snn_res <- word(cluster_colname, 2, sep = "res\\.")
-    snn_res <- paste0("clusters_res_", snn_res)
-    
-    sce[[snn_res]] <- seurat[[cluster_colname]][[cluster_colname]]
-  }
-  
-  print(HVG_plot)
-  print(PCA_variance_plot)
-  
-  if (return_obj == "sce") {
-    return(sce)
-  } else if (return_obj == "seurat") {
-    return(seurat)
-  }
-}
-```
-
 # Process all cells
 
 ```{r process_sce}
 sce <- process_sce(
-  sce,
-  pca_variance_threshold = 2,
-  UMAP_n_neighbors = 50,
-  UMAP_min_dist = 0.4,
+  sce, 
+  HVF_method = "scran_mgv",
+  HVG_fdr_threshold = 0.2,
+  pca_variance_threshold = 1.5,
   seed = seed,
+  FindClusters_res = c(0.1, 0.2, 0.3, 0.35, 0.4, 0.5, 0.6),
   return_obj = "sce"
 )
 ```
@@ -272,7 +110,7 @@ plotUMAP(sce,
 ```
 
 ```{r UMAP_clusters, fig.width=8, fig.height=7}
-sce[["clusters"]] <- sce[["clusters_res_0.4"]]
+sce[["clusters"]] <- sce[["clusters_res_0.3"]]
 plotUMAP(sce,
          color_by = "clusters",
          text_by = "clusters")
@@ -296,6 +134,14 @@ plotUMAP(sce,
 ```{r, fig.width=10, fig.height=10}
 plotUMAP(sce,
          color_by = "Sample", other_fields = "Sample") +
+  facet_wrap(
+    ~ Sample
+  )
+```
+
+```{r, fig.width=10, fig.height=10}
+plotUMAP(sce,
+         color_by = "IGKC", other_fields = "Sample") +
   facet_wrap(
     ~ Sample
   )
@@ -354,7 +200,7 @@ for(position in names(phases)){
 }
 TCP.df[is.na(TCP.df$Phase), ]$Phase <- "G0"
 TCP.df$Phase <- factor(TCP.df$Phase,
-                       levels = c("G0", "G1", "S", "G2.M"))
+                       levels = c("G0", "G1", "S", "G2.M") )
 
 sce$tricyclePhase <- TCP.df$Phase
 
@@ -428,13 +274,15 @@ plotUMAP(sce,
 
 ## B cell clusters
 
-```{r, fig.width=15, fig.height=5}
+```{r, fig.width=10, fig.height=9}
 plotUMAP(sce, color_by = "clusters", text_by = "clusters") +
   labs(title = "Clusters") +
   plotUMAP(sce, color_by = "cell_type_main") +
   labs(title = "Cell types") +
   plotUMAP(sce, color_by = "MS4A1") +
-  labs(title = "CD20 - B cells")
+  labs(title = "CD20 - B cells") +
+  plotUMAP(sce, color_by = "CCND1") +
+  labs(title = "Cyclin D1")
 ```
 
 ## Label cell clusters
@@ -448,8 +296,8 @@ cell_type_df <- colData(sce) %>%
   arrange(clusters) %>% 
   mutate(
     cell_type_manual = case_when(
-      clusters %in% c(15) ~ "Other",
-      clusters %in% c(2, 4, 12, 13) ~ "T cell",
+      clusters %in% c(16, 17) ~ "Other",
+      clusters %in% c(2, 6, 12, 13) ~ "T cell",
       TRUE ~ "B cell",
     )
   )
@@ -481,21 +329,27 @@ for (cluster_col in cluster_cols) {
 
 sce_B <- process_sce(
   sce_B,
-  RunPCA_npcs = 30,
-  pca_variance_threshold = 2,
-  FindNeighbors_knn = 30,
-  FindClusters_res = c(0.3, 0.35, 0.4, 0.45, 0.5),
+  HVF_method = "scran_mgv",
+  HVG_fdr_threshold = 0.2,
+  pca_variance_threshold = 1.5,
+  FindClusters_res = c(0.1, 0.2, 0.3, 0.35, 0.4, 0.5, 0.6),
   seed = seed,
   return_obj = "sce"
 )
 ```
 
-```{r, fig.width=10, fig.height=5}
-plotUMAP(sce_B,
-         color_by = "MS4A1") +
-  plotUMAP(sce_B,
-         color_by = "CCND1")
+```{r, fig.width=15, fig.height=6}
+plotUMAP(sce_B, color_by = "Sample") +
+  theme(legend.position = "bottom") +
+
+plotUMAP(sce_B, color_by = "CCND1") +
+  theme(legend.position = "bottom") +
+  labs(title = "Cyclin D1") +
+  
+  plotUMAP(sce_B, color_by = "tricyclePhase") +
+  theme(legend.position = "bottom")
 ```
+
 
 ```{r, fig.width=8, fig.height=7}
 cluster_cols <- grep("^clusters_res", colnames(sce_B@colData), value = TRUE)
@@ -509,7 +363,7 @@ cluster_plots
 ```
 
 ```{r, fig.width=15, fig.height=6}
-sce_B[["clusters"]] <- sce_B[["clusters_res_0.3"]]
+sce_B[["clusters"]] <- sce_B[["clusters_res_0.1"]]
 
 plotUMAP(sce_B, color_by = "Sample") +
   theme(legend.position = "bottom") +
@@ -521,6 +375,18 @@ plotUMAP(sce_B, color_by = "Sample") +
   theme(legend.position = "bottom") +
   labs(title = "Cyclin D1")
 ```
+
+```{r, fig.width=15, fig.height=6}
+plotUMAP(sce_B, color_by = "IGLC1") +
+  theme(legend.position = "bottom") +
+  
+  plotUMAP(sce_B, color_by = "IGLC2") +
+  theme(legend.position = "bottom") +
+  
+  plotUMAP(sce_B, color_by = "IGKC") +
+  theme(legend.position = "bottom")
+```
+
 
 ```{r, fig.width=15, fig.height=6}
 plotUMAP(sce_B,
@@ -539,7 +405,7 @@ B_cells_df <- colData(sce_B) %>%
   arrange(clusters) %>% 
   mutate(
     cell_type_manual = case_when(
-      clusters %in% c(4, 12) ~ "B cell",
+      clusters %in% c(3) ~ "B cell",
       TRUE ~ "MCL cell"
     )
   )
@@ -658,16 +524,79 @@ plotUMAP(sce, color_by = "cell_type_manual") +
 ```{r, fig.height=6, fig.width=10}
 sce_T <- sce[, sce$cell_type_manual == "T cell"]
 
+# Remove T cells with IgG contamination
+IGKC_logcount_thresh <- 0.5
+
+IgG_logcounts <- logcounts(sce_T["IGKC", ])[1, ]
+IgG_logcounts <- data.frame(
+  Sample_Barcode = names(IgG_logcounts),
+  IgG_logcount = unname(IgG_logcounts)
+)
+
+sce_T$contaminated_Tcell <- left_join(
+    as.data.frame(colData(sce_T)),
+    IgG_logcounts,
+    by = join_by("Sample_Barcode")
+  ) %>% 
+  mutate(
+    contaminated_Tcell = case_when(
+      IgG_logcount > IGKC_logcount_thresh ~ TRUE,
+      TRUE ~ FALSE
+    )
+  ) %>% 
+  pull(contaminated_Tcell)
+
+sce_T$IgG_logcounts <- logcounts(sce_T["IGKC", ])[1, colnames(sce_T)]
+
+sce_T
+```
+
+```{r fig.width=8, fig.height=7}
+plotUMAP(sce_T, color_by = "contaminated_Tcell")
+```
+
+```{r}
+plotColData(
+  sce_T,
+  y = "contamination",
+  x = "IgG_logcounts",
+  color_by = "contaminated_Tcell"
+) +
+  scale_x_continuous(
+    #trans = "pseudo_log",
+    breaks = c(0, 0.5, 1, 2, 10, 30)) +
+  geom_vline(xintercept = IGKC_logcount_thresh)
+```
+
+```{r}
+colData(sce_T) %>%
+  as.data.frame() %>%
+  group_by(Compartment, contaminated_Tcell) %>%
+  reframe(cells = n()) %>%
+  pivot_wider(
+    names_from = contaminated_Tcell,
+    values_from = cells,
+    names_prefix = "contaminated_",
+    values_fill = 0
+  )
+```
+
+
+```{r, fig.height=6, fig.width=10}
 cluster_cols <- grep("^clusters_res", colnames(sce_T@colData), value = TRUE)
 for (cluster_col in cluster_cols) {
   sce_T[[cluster_col]] <- NULL
 }
 
+sce_T <- sce_T[, sce_T$]
+
 sce_T <- process_sce(
   sce_T,
-  vars_to_regress = "tricyclePhase",
-  RunPCA_npcs = 30,
-  pca_variance_threshold = 2,
+  HVF_method = "scran_mgv",
+  HVG_fdr_threshold = 0.2,
+  vars_to_regress = "IgG_logcount",
+  pca_variance_threshold = 1.5,
+  FindClusters_res = c(0.1, 0.2, 0.3, 0.35, 0.4, 0.45, 0.5),
   seed = seed,
   return_obj = "sce"
 )
@@ -688,7 +617,6 @@ plotUMAP(sce_T, color_by = "IGKC") +
   plotUMAP(sce_T, color_by = "IGHM")
 ```
 
-
 ```{r, fig.width=8, fig.height=7}
 cluster_cols <- grep("^clusters_res", colnames(sce_T@colData), value = TRUE)
 
@@ -702,7 +630,7 @@ cluster_plots
 
 
 ```{r, fig.width=11, fig.height=7}
-sce_T[["clusters"]] <- sce_T[["clusters_res_0.4"]]
+sce_T[["clusters"]] <- sce_T[["clusters_res_0.2"]]
 plotUMAP(
     sce_T,
     color_by = "clusters",
@@ -710,6 +638,17 @@ plotUMAP(
     ) +
   theme_bw() +
   facet_wrap(~ Compartment)
+```
+
+```{r}
+colData(sce_T) %>% 
+  as.data.frame() %>% 
+  group_by(Compartment, clusters) %>% 
+  reframe(cells = n()) %>% 
+  pivot_wider(
+    names_from = "Compartment", values_from = "cells", values_fill = 0
+  ) %>% 
+  arrange(clusters)
 ```
 
 ```{r, fig.width=12, fig.height=10}
@@ -743,8 +682,10 @@ for(cluster in T_cell_clusters){
                          test.use = "wilcox",
                          logfc.threshold = 0.5,
                          min.pct = 0.1,
-                         only.pos = TRUE)
-  markers_text <- head(markers, n = 40) %>% 
+                         only.pos = TRUE,
+                         random.seed = seed
+                         )
+  markers_text <- head(markers, n = 60) %>% 
     rownames() %>% 
     paste(collapse = ", ")
   markers_text <- paste0("Cluster ", cluster, ": ", markers_text)
@@ -753,63 +694,6 @@ for(cluster in T_cell_clusters){
 text <- paste(markers_list, collapse = "\n\n")
 cat(text)
 ```
-
-Cluster 1: Effector/Effector Memory CD8+ T cells
-
-Strong cytotoxic signature (GZMH, GZMB, GZMM, PRF1)
-Clear CD8+ identity (CD8A, CD8B)
-Terminal differentiation markers (KLRG1)
-Effector chemokines (CCL5)
-
-Cluster 2: Naive/Central Memory CD4+ T cells
-
-Characterized by IL7R, LTB, TCF7, LEF1 (naive/memory markers)
-Expression of CD40LG and TNFRSF4 (OX40) typical of CD4+ T cells
-CCR7 expression (key for lymph node homing)
-Abundant ribosomal proteins indicating active protein synthesis
-Lacks cytotoxic markers
-
-Cluster 3: Exhausted/Dysfunctional T cells
-
-Multiple exhaustion markers (HAVCR2/TIM-3, LAG3, PDCD1/PD-1, TIGIT)
-CXCL13 expression typical of exhausted populations
-GZMK expression (characteristic of less differentiated memory CD8+ T cells)
-Likely represents T cells with chronic stimulation
-
-Cluster 4: NK cells
-
-Classic NK markers (NCAM1/CD56, NCR1/NKp46)
-KIR family receptors (KIR2DL3)
-Strong cytotoxic program (GNLY, GZMB, PRF1)
-NK-specific adaptor molecules (TYROBP/DAP12, FCER1G)
-Absence of TCR/CD3 complex genes except CD247 (which is shared with NK receptors)
-
-Cluster 5: Recently Activated CD8+ T cells
-
-Immediate early response genes (DUSP1, DUSP2, JUN family)
-Activation markers (CD69)
-Pro-inflammatory chemokines (CCL3, CCL4)
-Cytotoxic program being initiated (GZMA, GZMK)
-
-Cluster 6: Intestinal CD8+ tissue-resident memory T cells (TRM)
-
-ITGA1 (CD49a): A definitive marker of tissue-resident memory T cells, particularly important for retention in intestinal tissues
-CD8A and cytotoxic machinery (GZMA, GZMH, GZMK): Confirming CD8+ T cell identity with cytolytic potential
-HLA-DRA, HLA-DRB1, CD74: MHC class II expression is observed in gut-resident CD8+ T cells, particularly in inflammatory contexts
-CXCR3: Critical for trafficking and retention of T cells in inflamed intestinal tissues
-ZNF683 (Hobit): Transcription factor specifically associated with tissue residency programming
-CD2, CD3D: Confirming T cell lineage
-
-IGKC and IGHM are contaminants.
-
-Cluster 7: γδ T cells
-
-T cell receptor gamma chain genes (TRGV5, TRGC2, TRGV3, TRGC1)
-NK-like phenotype (multiple KLR receptors)
-Cytotoxic capacity (GZMB, PRF1)
-FCGR3A expression (CD16, typically absent in conventional T cells)
-
-Cluster 8: Cycling T cells
 
 ```{r}
 cells_df <- colData(sce_T) %>% 
@@ -820,15 +704,13 @@ cells_df <- colData(sce_T) %>%
   arrange(clusters) %>% 
   mutate(
     cell_type_manual = case_when(
-      clusters == 1 ~ "T cells effector CD8+",
-      clusters == 2 ~ "T cells CD4+",
-      clusters == 3 ~ "T cells exhausted",
-      clusters == 4 ~ "NK cells",
-      clusters == 5 ~ "T cells activated CD8+",
-      clusters == 6 ~ "T cells tissue-resident",
-      clusters == 7 ~ "T cells γδ",
-      clusters == 8 ~ "T cells cycling"
-      
+      clusters == 1 ~ "T cells CD4+",
+      clusters == 2 ~ "T cells CD8+ Effector/Memory",
+      clusters == 3 ~ "T cells CD8+ Effector/Cytotoxic",
+      clusters == 4 ~ "T cells CD8+ Exhausted",
+      clusters == 5 ~ "NK cells",
+      clusters == 6 ~ "T cells γδ",
+      clusters == 7 ~ "",
     )
   )
 
