@@ -56,11 +56,6 @@ RUN Rscript -e 'BiocManager::install("VariantAnnotation")'
 RUN apt-get install jags -y
 RUN Rscript -e 'remotes::install_github("https://github.com/dmkv1/infercnv_recolor.git")'
 
-# DE testing
-RUN Rscript -e 'BiocManager::install("DEsingle")'
-RUN Rscript -e 'devtools::install_github("cz-ye/DECENT")'
-RUN Rscript -e 'BiocManager::install("ReactomePA")'
-
 # fix or Matrix cholmod bug
 RUN Rscript -e 'install.packages("irlba")'
 
@@ -73,8 +68,8 @@ RUN Rscript -e 'install.packages("optparse")'
 # Ambient RNA removal tools
 RUN Rscript -e 'BiocManager::install("decontX")'
 
-RUN apt-get update && apt-get install -y python3-pip python3-venv python3-full
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install cellbender
-RUN pip install CellClear
+# DE tools
+RUN Rscript -e 'BiocManager::install("MAST")'
+# RUN Rscript -e 'BiocManager::install("DEsingle")'
+# RUN Rscript -e 'devtools::install_github("cz-ye/DECENT")'
+# RUN Rscript -e 'BiocManager::install("ReactomePA")'
