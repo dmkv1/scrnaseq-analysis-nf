@@ -90,13 +90,18 @@ workflow {
             def mito_thresh = row.containsKey('mito_thresh') && row.mito_thresh?.trim()
                 ? row.mito_thresh.toFloat()
                 : params.qc.mito_thresh
+            
+            def contam_thresh = row.containsKey('contam_thresh') && row.contam_thresh?.trim()
+                ? row.contam_thresh.toFloat()
+                : params.qc.contam_thresh
 
-            return [sample_id, nUMI_thresh, nGenes_thresh, mito_thresh]
+            return [sample_id, nUMI_thresh, nGenes_thresh, mito_thresh, contam_thresh]
         }
 
     CELL_QC(
         file("templates/3_cell_qc.Rmd"),
-        DOUBLET_DETECTION.out.sce.join(ch_qc_params),
+        file("bin/process_sce.R"),
+        DOUBLET_DETECTION.out.sce.join(ch_qc_params).join(AMBIENT_RNA.out.perCellCont),        
         seed,
     )
 
