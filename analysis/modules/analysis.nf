@@ -18,6 +18,7 @@ process ANNOTATE {
 
     input:
     path('annotation.Rmd')
+    path 'process_sce.R'
     path merged_sce
     val seed
 
@@ -34,9 +35,10 @@ process ANNOTATE {
                                     toc = TRUE,
                                     toc_float = TRUE),
                 params = list(
+                    seed = ${seed},
                     input_file = '${merged_sce}',
                     output_file = 'annotated.sce',
-                    seed = ${seed}
+                    process_fun = 'process_sce.R'
                     ))"
     """
 }
@@ -48,6 +50,7 @@ process INFERCNV {
     input:
     tuple val(patient_id), val(k_obs_groups)
     path annotated_sce
+    path reference_gencode
     val seed
 
     output:
@@ -55,11 +58,11 @@ process INFERCNV {
 
     script:
     """
-    Rscript run_inferCNV.R \
+    run_inferCNV.R \
         -i '${annotated_sce}' \
         --patient '${patient_id}' \
         --k_obs_groups '${k_obs_groups}' \
-        --hg38_gencode '${params.inferCNV.hg38_gencode}'\
+        --hg38_gencode '${reference_gencode}'\
         --seed ${seed}
     """
 }

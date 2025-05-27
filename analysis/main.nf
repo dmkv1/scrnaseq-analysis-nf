@@ -112,6 +112,7 @@ workflow {
     if (params.annotation_ready) {
         ANNOTATE(
             file("templates/4_annotation.Rmd"),
+            file("bin/process_sce.R"),
             MERGE.out.merged_sce,
             seed,
         )
@@ -119,7 +120,7 @@ workflow {
         ch_patients = Channel.fromPath(params.patients, checkIfExists: true)
             .splitCsv(header: true)
             .map { row ->
-                def patient_id = row.patient
+                def patient_id = row.patient_id
                 def k_obs_groups = row.k_obs_groups.toInteger()
 
                 return [patient_id, k_obs_groups]
@@ -128,6 +129,7 @@ workflow {
         INFERCNV(
             ch_patients,
             ANNOTATE.out.annotated_sce,
+            file(params.inferCNV.hg38_gencode),
             seed,
         )
     }
