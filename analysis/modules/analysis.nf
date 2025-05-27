@@ -63,6 +63,8 @@ process INFERCNV {
         --patient '${patient_id}' \
         --k_obs_groups '${k_obs_groups}' \
         --hg38_gencode '${reference_gencode}'\
+        --tumor_annotation 'MCL cell' \
+        --tumor_label 'MCL' \
         --seed ${seed}
     """
 }
