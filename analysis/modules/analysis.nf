@@ -13,27 +13,31 @@ process MERGE {
     """
 }
 
-process ANNOTATE {
+process LABEL_TUMOR_CELLS {
     publishDir "${params.outdir}/SCE", mode: 'copy'
 
     input:
-    path('annotation.Rmd')
+    path('tumor_annotation.Rmd')
     path 'process_sce.R'
     path merged_sce
     val seed
 
     output:
-    path("annotation.nb.html"), emit: report
-    path("annotated.sce"), emit: annotated_sce
+    path("tumor_annotation.nb.html"), emit: report
+    path("annotated_tumor.sce"), emit: annotated_sce
 
     script:
     """
-    Rscript -e "rmarkdown::render('annotation.Rmd',
+    Rscript -e "rmarkdown::render('tumor_annotation.Rmd',
                 output_file = 'annotation.nb.html',
                 output_format = 'html_notebook',
-                output_options = list(code_folding = 'hide',
-                                    toc = TRUE,
-                                    toc_float = TRUE),
+                output_options = list(
+                    self_contained = TRUE,
+                    df_print = "paged",
+                    code_folding = 'hide',
+                    toc = TRUE,
+                    toc_float = TRUE
+                ),
                 params = list(
                     seed = ${seed},
                     input_file = '${merged_sce}',

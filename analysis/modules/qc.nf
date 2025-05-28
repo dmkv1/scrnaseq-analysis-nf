@@ -18,9 +18,13 @@ process DROPLETS_TO_CELLS {
     Rscript -e "rmarkdown::render('droplets_to_cells.Rmd',
                 output_file = '${sample_id}_droplets_to_cells.nb.html',
                 output_format = 'html_notebook',
-                output_options = list(code_folding = 'hide',
-                                    toc = TRUE,
-                                    toc_float = TRUE),
+                output_options = list(
+                    self_contained = TRUE,
+                    df_print = "paged",
+                    code_folding = 'hide',
+                    toc = TRUE,
+                    toc_float = TRUE
+                    ),
                 params = list(
                                sample_id = '${sample_id}',
                                path_sce_input = '${sce}',
@@ -73,9 +77,13 @@ process DOUBLET_DETECTION {
     Rscript -e "rmarkdown::render('doublets.Rmd',
                 output_file = '${sample_id}_doublets.nb.html',
                 output_format = 'html_notebook',
-                output_options = list(code_folding = 'hide',
-                                    toc = TRUE,
-                                    toc_float = TRUE),
+                output_options = list(
+                    self_contained = TRUE,
+                    df_print = "paged",
+                    code_folding = 'hide',
+                    toc = TRUE,
+                    toc_float = TRUE
+                ),
                 params = list(
                                sample_id = '${sample_id}',
                                path_sce_input = '${sce}',
@@ -105,9 +113,13 @@ process CELL_QC {
     Rscript -e "rmarkdown::render('cell_qc.Rmd',
                 output_file = '${sample_id}_cell_QC.nb.html',
                 output_format = 'html_notebook',
-                output_options = list(code_folding = 'hide',
-                                    toc = TRUE,
-                                    toc_float = TRUE),
+                output_options = list(
+                    self_contained = TRUE,
+                    df_print = "paged",
+                    code_folding = 'hide',
+                    toc = TRUE,
+                    toc_float = TRUE
+                ),
                 params = list(
                     sample_id = '${sample_id}',
                     path_sce_input = '${sce}',

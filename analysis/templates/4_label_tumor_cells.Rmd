@@ -1093,9 +1093,11 @@ marker_genes <- list(
   "B cells Memory"            = c("LTB", "CCR7", "SELL", "CXCR5", "CD40", "GPR183"),
   "B cells Progenitors/Pro-B" = c("RAG1", "RAG2", "VPREB1", "CD38", "IL7R", "TCL1A"),
   "Erythroid progenitors"     = c("GATA1", "HBA1", "GYPA", "ALAS2", "KLF1", "CD34"),
-  "Monocytes Classical"       = c("CD14", "S100A8", "S100A9", "LYZ", "FCGR1A", "CCR2"),
+  "Monocytes Classical"       = c("CD14", "S100A8", "S100A9", "LYZ", "FCGR1A", "CCR2", "FCN1"), # FCN1 pan-monocyte marker
   "Monocytes Non-classical"   = c("FCGR3A", "CX3CR1", "LST1", "CSF1R", "C1QA", "AIF1"),
   "Plasma cells"              = c("PRDM1", "XBP1", "JCHAIN", "SDC1", "TNFRSF17", "SLAMF7")
+  
+  # remove JUN
 )
 all_markers <- unique(unlist(marker_genes)) %>% rev()
 

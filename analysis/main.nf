@@ -11,7 +11,7 @@ include { DOUBLET_DETECTION } from './modules/qc'
 include { CELL_QC } from './modules/qc'
 // Merged analysis
 include { MERGE } from './modules/analysis'
-include { ANNOTATE } from './modules/analysis'
+include { LABEL_TUMOR_CELLS } from './modules/analysis'
 include { INFERCNV } from './modules/analysis'
 
 workflow {
@@ -109,9 +109,9 @@ workflow {
         CELL_QC.out.sce.collect()
     )
 
-    if (params.annotation_ready) {
-        ANNOTATE(
-            file("templates/4_annotation.Rmd"),
+    if (params.tumor_labelled) {
+        LABEL_TUMOR_CELLS(
+            file("templates/4_label_tumor_cells.Rmd"),
             file("bin/process_sce.R"),
             MERGE.out.merged_sce,
             seed,
@@ -128,7 +128,7 @@ workflow {
 
         INFERCNV(
             ch_patients,
-            ANNOTATE.out.annotated_sce,
+            LABEL_TUMOR_CELLS.out.annotated_sce,
             file(params.inferCNV.hg38_gencode),
             seed,
         )
