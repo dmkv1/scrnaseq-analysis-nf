@@ -128,7 +128,7 @@ workflow {
 
         INFERCNV(
             ch_patients,
-            LABEL_TUMOR_CELLS.out.annotated_sce,
+            LABEL_TUMOR_CELLS.out.tumor_annotated_sce,
             file(params.inferCNV.hg38_gencode),
             seed,
         )

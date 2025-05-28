@@ -20,7 +20,7 @@ process DROPLETS_TO_CELLS {
                 output_format = 'html_notebook',
                 output_options = list(
                     self_contained = TRUE,
-                    df_print = "paged",
+                    df_print = 'paged',
                     code_folding = 'hide',
                     toc = TRUE,
                     toc_float = TRUE
@@ -79,7 +79,7 @@ process DOUBLET_DETECTION {
                 output_format = 'html_notebook',
                 output_options = list(
                     self_contained = TRUE,
-                    df_print = "paged",
+                    df_print = 'paged',
                     code_folding = 'hide',
                     toc = TRUE,
                     toc_float = TRUE
@@ -115,7 +115,7 @@ process CELL_QC {
                 output_format = 'html_notebook',
                 output_options = list(
                     self_contained = TRUE,
-                    df_print = "paged",
+                    df_print = 'paged',
                     code_folding = 'hide',
                     toc = TRUE,
                     toc_float = TRUE

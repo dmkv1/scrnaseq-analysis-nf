@@ -24,7 +24,7 @@ process LABEL_TUMOR_CELLS {
 
     output:
     path("tumor_annotation.nb.html"), emit: report
-    path("annotated_tumor.sce"), emit: annotated_sce
+    path("annotated_tumor.sce"), emit: tumor_annotated_sce
 
     script:
     """
@@ -33,7 +33,7 @@ process LABEL_TUMOR_CELLS {
                 output_format = 'html_notebook',
                 output_options = list(
                     self_contained = TRUE,
-                    df_print = "paged",
+                    df_print = 'paged',
                     code_folding = 'hide',
                     toc = TRUE,
                     toc_float = TRUE
@@ -41,7 +41,7 @@ process LABEL_TUMOR_CELLS {
                 params = list(
                     seed = ${seed},
                     input_file = '${merged_sce}',
-                    output_file = 'annotated.sce',
+                    output_file = 'annotated_tumor.sce',
                     process_fun = 'process_sce.R'
                     ))"
     """
