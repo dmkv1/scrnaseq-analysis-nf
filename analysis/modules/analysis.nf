@@ -17,19 +17,19 @@ process LABEL_TUMOR_CELLS {
     publishDir "${params.outdir}/SCE", mode: 'copy'
 
     input:
-    path('tumor_annotation.Rmd')
+    path('label_tumor_cells.Rmd')
     path 'process_sce.R'
     path merged_sce
     val seed
 
     output:
-    path("tumor_annotation.nb.html"), emit: report
+    path("label_tumor_cells.nb.html"), emit: report
     path("annotated_tumor.sce"), emit: tumor_annotated_sce
 
     script:
     """
-    Rscript -e "rmarkdown::render('tumor_annotation.Rmd',
-                output_file = 'annotation.nb.html',
+    Rscript -e "rmarkdown::render('label_tumor_cells.Rmd',
+                output_file = 'label_tumor_cells.nb.html',
                 output_format = 'html_notebook',
                 output_options = list(
                     self_contained = TRUE,
