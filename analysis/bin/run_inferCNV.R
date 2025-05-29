@@ -46,6 +46,11 @@ option_list <- list(
     help = "hg38 gencode reference"
   ),
   make_option(
+    c("--num_threads"),
+    type = "integer",
+    default = 16
+  ),
+  make_option(
     c("--seed"),
     type = "integer",
     default = 42,
@@ -54,6 +59,8 @@ option_list <- list(
 )
 opt_parser <- OptionParser(option_list = option_list)
 opts <- parse_args(opt_parser)
+
+threads <- opts$num_threads
 
 seed <- opts$seed
 set.seed(seed)
@@ -127,5 +134,5 @@ inferCNVobj <- infercnv::run(
   output_format = "png",
   png_res = 600,
   
-  num_threads = 16
+  num_threads = threads
 )
