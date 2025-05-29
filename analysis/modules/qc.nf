@@ -42,6 +42,7 @@ process AMBIENT_RNA {
 
     input:
     tuple val(sample_id), path(filtered_mtx_path), path(raw_mtx_path)
+    val seed
 
     output:
     tuple val(sample_id), path("decontX_feature_bc_matrix/"), emit: clean_fbmtx
@@ -54,7 +55,8 @@ process AMBIENT_RNA {
         --droplets_fbmtx "${raw_mtx_path}" \
         --use_empty TRUE \
         --decont_fbmtx "decontX_feature_bc_matrix" \
-        --perCell "${sample_id}_perCellCont.rds"
+        --perCell "${sample_id}_perCellCont.rds" \
+        --seed ${seed}
     """
 }
 

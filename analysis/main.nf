@@ -57,7 +57,8 @@ workflow {
     }
 
     AMBIENT_RNA(
-        DROPLETS_TO_CELLS.out.filtered_fbmtx.join(ch_raw_fbmtx)
+        DROPLETS_TO_CELLS.out.filtered_fbmtx.join(ch_raw_fbmtx),
+        seed,
     )
 
     ch_clean_fbmtx = AMBIENT_RNA.out.clean_fbmtx
@@ -90,7 +91,7 @@ workflow {
             def mito_thresh = row.containsKey('mito_thresh') && row.mito_thresh?.trim()
                 ? row.mito_thresh.toFloat()
                 : params.qc.mito_thresh
-            
+
             def contam_thresh = row.containsKey('contam_thresh') && row.contam_thresh?.trim()
                 ? row.contam_thresh.toFloat()
                 : params.qc.contam_thresh
@@ -101,7 +102,7 @@ workflow {
     CELL_QC(
         file("templates/3_cell_qc.Rmd"),
         file("bin/process_sce.R"),
-        DOUBLET_DETECTION.out.sce.join(ch_qc_params).join(AMBIENT_RNA.out.perCellCont),        
+        DOUBLET_DETECTION.out.sce.join(ch_qc_params).join(AMBIENT_RNA.out.perCellCont),
         seed,
     )
 

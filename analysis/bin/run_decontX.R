@@ -11,10 +11,14 @@ option_list <- list(
   make_option(c("--droplets_fbmtx"), type = "character", default = NULL),
   make_option(c("--use_empty"), type = "logical", default = FALSE),
   make_option(c("--decont_fbmtx"), type = "character", default = "decontX_feature_bc_matrix"),
-  make_option(c("--perCell"), type = "character", default = "perCell.rds")
+  make_option(c("--perCell"), type = "character", default = "perCell.rds"),
+  make_option(c("--seed"), type = "integer", default = 42, help = "Random seed")
 )
 opt_parser <- OptionParser(option_list = option_list)
 opts <- parse_args(opt_parser)
+
+seed <- opts$seed
+set.seed(seed)
 
 run_DecontX <- function(cells_fbmtx,
                         droplets_fbmtx,
