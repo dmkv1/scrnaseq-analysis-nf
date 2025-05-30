@@ -69,7 +69,7 @@ process INFERCNV {
         --hg38_gencode '${reference_gencode}'\
         --tumor_annotation 'MCL cell' \
         --tumor_label 'MCL' \
-        --num_threads '${params.max_cpus}' \
+        --num_threads '${params.inferCNV.threads}' \
         --seed ${seed}
     """
 }
