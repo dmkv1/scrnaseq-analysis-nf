@@ -7,13 +7,15 @@ tmp
 *.rds
 *.RData
 
+scrnaseq-alignment/output
+
+scrnaseq-analysis-nxf/templates/gypsum_cache
+
 .nextflow/
 .nextflow.pid
 *nextflow.log*
 work/
 results/
-
-alignment/output
 
 *.dat
 *.infercnv_obj
@@ -23,7 +25,5 @@ alignment/output
 *.nb.html
 *.png
 *.pdf
-
-analysis/templates/gypsum_cache
 
 tests/

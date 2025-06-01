@@ -125,8 +125,15 @@ inferCNVobj <- infercnv::run(
   analysis_mode = "subclusters",
   hclust_method = 'ward.D2',
   
-  tumor_subcluster_partition_method = "random_trees",
+  tumor_subcluster_partition_method = "leiden",
   tumor_subcluster_pval = 0.01,
+
+  k_nn=20,
+  leiden_method = "PCA",
+  leiden_function = "CPM",
+  leiden_method_per_chr = "simple",
+  leiden_function_per_chr = "modularity",
+  leiden_resolution_per_chr = 1,
   
   write_phylo = TRUE,
   
