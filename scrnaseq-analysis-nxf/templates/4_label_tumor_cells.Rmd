@@ -325,9 +325,9 @@ cell_type_df <- colData(sce) %>%
   arrange(clusters) %>% 
   mutate(
     cell_type_manual = case_when(
-      clusters %in% c(2, 9, 12, 13) ~ "NK/T cell",
-      clusters %in% c(15, 16) ~ "Other",
-      TRUE ~ "B cell",
+      clusters %in% c(2, 5, 12, 13) ~ "NK/T cells",
+      clusters %in% c(16, 17) ~ "Other",
+      TRUE ~ "B cells",
     )
   )
 
@@ -349,7 +349,7 @@ plotUMAP(sce, color_by = "cell_type_manual",) +
 # Re-cluster B cells
 
 ```{r process_sce_B_cells, fig.height=6, fig.width=10}
-sce_B <- sce[, sce$cell_type_manual == "B cell"]
+sce_B <- sce[, sce$cell_type_manual == "B cells"]
 
 cluster_cols <- grep("^clusters_res", colnames(sce_B@colData), value = TRUE)
 for (cluster_col in cluster_cols) {
@@ -434,8 +434,8 @@ B_cells_df <- colData(sce_B) %>%
   arrange(clusters) %>% 
   mutate(
     cell_type_manual = case_when(
-      clusters %in% c(3, 11) ~ "B cell",
-      TRUE ~ "MCL cell"
+      clusters %in% c(2, 12, 13) ~ "B cells",
+      TRUE ~ "MCL cells"
     )
   )
 
@@ -458,11 +458,11 @@ plotUMAP(sce_B, color_by = "cell_type_manual",) +
 ## Inspect CCND1 threshold
 
 ```{r, fig.height=4, fig.width=5}
-cell.types <- c("MCL cell", "B cell")
+cell.types <- c("MCL cells", "B cells")
 
 CCND1_logcount_threshold <- 0.5
 
-cell.types <- c("B cell", "MCL cell")
+cell.types <- c("B cells", "MCL cells")
 
 CCND1_logcount_threshold <- 0.25
 
@@ -535,11 +535,15 @@ cell_types <- colData(sce) %>%
   ) %>% 
   mutate(
     cell_type_manual = case_when(
-      cell_type_manual == "B cell" ~ Bcell_type,
+      cell_type_manual == "B cells" ~ Bcell_type,
       TRUE ~ cell_type_manual
     )
   )
+cell_types$cell_type_manual %>% unique()
+```
 
+
+```{r}
 sce$cell_type_manual <- cell_types$cell_type_manual
 ```
 
@@ -551,7 +555,7 @@ plotUMAP(sce, color_by = "cell_type_manual") +
 # Refine normal B cells and other cells
 
 ```{r, fig.height=6, fig.width=10}
-sce_n <- sce[, sce$cell_type_manual %in% c("B cell", "Other")]
+sce_n <- sce[, sce$cell_type_manual %in% c("B cells", "Other")]
 
 cluster_cols <- grep("^clusters_res", colnames(sce_n@colData), value = TRUE)
 for (cluster_col in cluster_cols) {
@@ -681,7 +685,7 @@ cells_df <- colData(sce_n) %>%
       clusters == 4 ~ "Monocytes Non-classical",
       clusters == 5 ~ "B cells Progenitors/Pro-B",
       clusters == 6 ~ "B cells Activated",
-      clusters == 7 ~ "MCL cell",
+      clusters == 7 ~ "MCL cells",
       clusters == 8 ~ "Erythroid progenitors",
       clusters == 9 ~ "Plasma cells",
     )
@@ -723,7 +727,7 @@ sce$cell_type_manual <- all_cell_types$cell_type
 
 ```{r}
 main_cell_types <- c(
-  "NK/T cell",
+  "NK/T cells",
   "B cells Naive/Mature",
   "B cells Activated",
   "B cells Progenitors/Pro-B",
@@ -732,7 +736,7 @@ main_cell_types <- c(
   "Monocytes Classical/Dendritic cells",
   "Monocytes Non-classical",
   "Erythroid progenitors",
-  "MCL cell"
+  "MCL cells"
   )             
 sce$cell_type_manual <- factor(sce$cell_type_manual, levels = main_cell_types)
 ```
