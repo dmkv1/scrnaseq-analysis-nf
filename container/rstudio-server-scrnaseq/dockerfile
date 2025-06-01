@@ -73,3 +73,4 @@ RUN Rscript -e 'BiocManager::install("MAST")'
 # RUN Rscript -e 'BiocManager::install("DEsingle")'
 # RUN Rscript -e 'devtools::install_github("cz-ye/DECENT")'
 # RUN Rscript -e 'BiocManager::install("ReactomePA")'
+
