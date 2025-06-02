@@ -117,14 +117,5 @@ workflow {
             MERGE.out.merged_sce,
             seed,
         )
-
-        ch_patients = Channel.fromPath(params.patients, checkIfExists: true)
-            .splitCsv(header: true)
-            .map { row ->
-                def patient_id = row.patient_id
-                def k_obs_groups = row.k_obs_groups.toInteger()
-
-                return [patient_id, k_obs_groups]
-            }
     }
 }
