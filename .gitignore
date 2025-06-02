@@ -29,4 +29,4 @@ results/
 tests/
 
 CNV_inference/SCEVAN
-CNV_inference/inferCNV/P*
+CNV_inference/inferCNV/output
