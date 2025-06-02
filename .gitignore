@@ -27,3 +27,6 @@ results/
 *.pdf
 
 tests/
+
+CNV_inference/SCEVAN
+CNV_inference/inferCNV/P*

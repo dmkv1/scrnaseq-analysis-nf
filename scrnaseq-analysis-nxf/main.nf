@@ -126,12 +126,5 @@ workflow {
 
                 return [patient_id, k_obs_groups]
             }
-
-        INFERCNV(
-            ch_patients,
-            LABEL_TUMOR_CELLS.out.tumor_annotated_sce,
-            file(params.inferCNV.hg38_gencode),
-            seed,
-        )
     }
 }
