@@ -38,7 +38,7 @@ for (patient_i in names(k_obs_groups.list)) {
   sample_annotations <- data.frame(Barcode = colnames(sce_patient),
                                    Cell_type = sce_patient$cell_type_infercnv)
   
-  inferCNV.sample.path <- file.path(workdir, patient_i)
+  inferCNV.sample.path <- file.path(workdir, "output", patient_i)
   dir.create(inferCNV.sample.path,
              showWarnings = F,
              recursive = T)
