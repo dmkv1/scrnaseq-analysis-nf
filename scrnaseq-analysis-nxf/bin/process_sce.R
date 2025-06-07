@@ -3,6 +3,7 @@ suppressPackageStartupMessages({
   library(Seurat)
   library(SingleCellExperiment)
   library(tidyverse)
+  library(scran)
 })
 
 process_sce <- function(sce,
