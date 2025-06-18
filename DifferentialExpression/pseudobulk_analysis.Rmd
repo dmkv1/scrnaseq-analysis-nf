@@ -1,0 +1,158 @@
+---
+title: "Differential expression analysis comparison of subclones aggregated across samples"
+params:
+  seed: 42
+  sce_process_fun: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nxf/bin/process_sce.R"
+  pseudobulk_fun: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/DifferentialExpression/pseudobulk_minimal.r"
+---
+
+```{r setup}
+wd <- "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/DifferentialExpression"
+
+seed <- params$seed
+set.seed(seed)
+
+library(tidyverse)
+library(SingleCellExperiment)
+library(scater)
+
+library(AnnotationHub)
+library(GenomicRanges)
+
+library(ComplexHeatmap)
+library(circlize)
+
+library(GenVisR)
+
+library(msigdbr)
+library(clusterProfiler)
+
+library(patchwork)
+
+library(openxlsx)
+
+sce_process_fun <- params$sce_process_fun
+source(sce_process_fun)
+
+pseudobulk_fun <- params$pseudobulk_fun
+source(pseudobulk_fun)
+```
+
+# The dataset
+
+```{r}
+patients <- c("P009", "P022", "P027", "P087", "P069")
+
+sce_list <- list()
+for (patient in patients) {
+  sce_list[[patient]] <- readRDS(file.path(
+    wd,
+    "results",
+    patient,
+    paste0("SCE_tumor_CNVs_", patient, ".rds")
+  ))
+}
+sce_tumor <- do.call(cbind, sce_list)
+sce_tumor
+```
+
+# Aggregation
+
+```{r}
+sce_tumor_dg <- sce_tumor[, sce_tumor$Timepoint == "DG"]
+
+perSample_cell_counts <- sce_tumor_dg %>% 
+  colData() %>% as.data.frame() %>% 
+  remove_rownames() %>%
+  group_by(Sample, Patient, clone_label) %>% 
+  reframe(cells = n())
+perSample_cell_counts
+```
+
+```{r}
+perPatient_cell_counts <- sce_tumor_dg %>% 
+  colData() %>% as.data.frame() %>% 
+  remove_rownames() %>%
+  group_by(Patient, clone_label) %>% 
+  reframe(cells = n())
+perPatient_cell_counts
+```
+
+```{r}
+perPatient_cell_counts %>% 
+  group_by(clone_label) %>% 
+  reframe(mean = mean(cells))
+```
+
+
+```{r}
+# Ensure the correct comparison direction - first level is compared to the second
+levels(sce_tumor_dg$clone_label)
+```
+
+```{r}
+# create combined ID for proper within-sample aggregation
+combined_id <- paste(sce_tumor_dg$Patient, sce_tumor_dg$clone_label, sep = "_")
+unique(combined_id)
+```
+
+# Differential expression
+
+```{r}
+DESeq2_res <- RunPseudobulkMethod(
+  raw.data = counts(sce_tumor_dg), 
+  normalized.data = logcounts(sce_tumor_dg),
+  individual = combined_id,
+  group = sce_tumor_dg$clone_label,
+  test = "DESeq2",
+  sum.or.mean = "sum"
+  )
+```
+
+```{r}
+DESeq2_res %>% 
+  na.omit() %>% 
+  arrange(desc(abs(logFC)))
+```
+
+```{r}
+pvalue_cutoff <- 0.05
+
+DESeq2_res %>%
+  na.omit() %>%
+  ggplot(., aes(x = logFC, y = -log10(pvalue))) +
+  geom_point() +
+  theme_bw(base_size = 14) +
+  labs(x = "log2 (Fold Change)", y = "-log10 (p value)") +
+  geom_hline(
+    yintercept = -log10(pvalue_cutoff),
+    linetype = "dashed",
+    color = "firebrick"
+  )
+```
+
+```{r}
+pvalue_cutoff <- 0.05
+
+DESeq2_res %>%
+  na.omit() %>%
+  ggplot(., aes(x = logFC, y = -log10(padj))) +
+  geom_point() +
+  theme_bw(base_size = 14) +
+  labs(x = "log2 (Fold Change)", y = "-log10 (adjusted p value)") +
+  geom_hline(
+    yintercept = -log10(pvalue_cutoff),
+    linetype = "dashed",
+    color = "firebrick"
+  )
+```
+
+No significantly changed genes across the patients were found in this dataset.
+
+
+# Sesson info
+
+```{r}
+sessionInfo()
+```
+
