@@ -7,6 +7,7 @@ suppressPackageStartupMessages({
 })
 
 process_sce <- function(sce,
+                        rowdata = "Symbol",
                         HVF_method = "seurat_vst",
                         n_HVGs = 2000,
                         HVG_fdr_threshold = 0.1,
@@ -32,7 +33,8 @@ process_sce <- function(sce,
   
   set.seed(seed)
   
-  rownames(sce) <- rowData(sce)[["Symbol"]]
+  rownames(sce) <- rowData(sce)[[rowdata]]
+  rowData(sce)[["Symbol"]] <- rownames(sce)
   
   reducedDims(sce)[["PCA"]] <- NULL
   reducedDims(sce)[["UMAP"]] <- NULL
