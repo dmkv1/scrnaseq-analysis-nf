@@ -312,6 +312,7 @@ contam_QC_plots(sce, "discard", contam_threshold, nUMI_thresh, nGenes_thresh, mi
 ```{r}
 sce <- process_sce(
   sce,
+  HVF_method = "seurat_vst",
   n_HVGs = 2000,
   RunPCA_npcs = 50,
   chosen_pcs = 20,
