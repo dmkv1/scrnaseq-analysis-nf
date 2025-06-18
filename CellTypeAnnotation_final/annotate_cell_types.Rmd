@@ -1,0 +1,95 @@
+---
+title: "Cell type annotation"
+params:
+  seed: 42
+  input_file: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nxf/results/SCE/annotated_tumor.sce"
+  output_file: "SingleCellExperiment_annotated.rds"
+  process_sce_fun: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nxf/bin/process_sce.R"
+---
+
+```{r setup}
+seed <- params$seed
+set.seed(seed)
+
+# Load the libraries
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(Seurat)
+  library(scater)
+  library(scran)
+  library(tricycle)
+  library(SingleR)
+  library(celldex)
+  library(tidyverse)
+  library(patchwork)
+  library(ggridges)
+})
+
+path_sce_input <- params$input_file
+path_sce_output <- params$output_file
+
+process_sce_fun <- params$process_sce_fun
+source(process_sce_fun)
+```
+
+# Read the sce
+
+```{r load_sce}
+sce <- readRDS(path_sce_input)
+sce
+```
+
+```{r fig.width=7, fig.height=5}
+plotUMAP(sce, color_by = "cell_type_manual",) +
+  labs(title = "Manual annotation")
+```
+
+# Marker dotplots
+
+```{r, fig.width=5, fig.height=10, message=FALSE}
+marker_genes <- list(
+  "B cells Activated"         = c("AICDA", "RGS13", "CD79A", "BANK1", "TXNIP"),
+  "B cells Naive/Mature"      = c("MS4A1", "CD72", "BANK1", "FCMR", "IGHD", "CD37"),
+  "B cells Memory"            = c("LTB", "CCR7", "SELL", "CXCR5", "CD40", "GPR183"),
+  "B cells Progenitors/Pro-B" = c("RAG1", "RAG2", "VPREB1", "CD38", "IL7R", "TCL1A"),
+  "Erythroid progenitors"     = c("GATA1", "HBA1", "GYPA", "ALAS2", "KLF1", "CD34"),
+  "Monocytes Classical"       = c("CD14", "S100A8", "S100A9", "LYZ", "FCGR1A", "CCR2", "FCN1"), # FCN1 pan-monocyte marker
+  "Monocytes Non-classical"   = c("FCGR3A", "CX3CR1", "LST1", "CSF1R", "C1QA", "AIF1"),
+  "Plasma cells"              = c("PRDM1", "XBP1", "JCHAIN", "SDC1", "TNFRSF17", "SLAMF7")
+)
+all_markers <- unique(unlist(marker_genes)) %>% rev()
+
+plotDots(
+  sce,
+  features = all_markers,
+  scale = TRUE,
+  center = TRUE,
+  group = "cell_type_manual",
+  zlim = c(-2.5, 2.5)
+) +
+  scale_color_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Average"
+  ) +
+  labs(x = NULL, y = NULL) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+# Save results
+
+```{r write_sce}
+saveRDS(sce, path_sce_output)
+```
+
+# Session info
+
+```{r sessionInfo}
+print(sessionInfo())
+```
+
+```{r gc}
+gc()
+```
