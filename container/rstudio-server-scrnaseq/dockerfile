@@ -70,7 +70,10 @@ RUN Rscript -e 'BiocManager::install("decontX")'
 
 # DE tools
 RUN Rscript -e 'BiocManager::install("MAST")'
+
+# devtools::install_github("lhe17/nebula")
+# BiocManager::install("muscat")
+# BiocManager::install("ROTS")
 # RUN Rscript -e 'BiocManager::install("DEsingle")'
 # RUN Rscript -e 'devtools::install_github("cz-ye/DECENT")'
 # RUN Rscript -e 'BiocManager::install("ReactomePA")'
-
