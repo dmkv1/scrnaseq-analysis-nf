@@ -8,7 +8,7 @@ suppressPackageStartupMessages({
 
 process_sce <- function(sce,
                         rowdata = "Symbol",
-                        HVF_method = "seurat_vst",
+                        HVF_method = "scran_mgv",
                         n_HVGs = 2000,
                         HVG_fdr_threshold = 0.1,
                         exclude_HVGs = NULL,
@@ -140,6 +140,10 @@ process_sce <- function(sce,
     min.dist = UMAP_min_dist,
     n.neighbors = UMAP_n_neighbors
   )
+  
+  # Remove previous clusters
+  cluster_cols <- grep("^clusters_res", colnames(sce@colData), value = TRUE)
+  colData(sce) <- colData(sce)[, !(colnames(colData(sce)) %in% cluster_cols)]
   
   seurat <- FindNeighbors(
     seurat,
