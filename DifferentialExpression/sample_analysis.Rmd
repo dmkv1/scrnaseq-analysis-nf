@@ -1,0 +1,1182 @@
+---
+title: "Analysis of copy number variation across subclones"
+params:
+  seed: 42
+  patient: "P009"
+  input_file: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nxf/results/SCE/annotated_tumor.sce"
+  process_fun: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nxf/bin/process_sce.R"
+---
+
+```{r setup}
+wd <- "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/DifferentialExpression"
+
+seed <- params$seed
+set.seed(seed)
+
+library(tidyverse)
+library(SingleCellExperiment)
+library(scater)
+
+library(AnnotationHub)
+library(GenomicRanges)
+
+library(ComplexHeatmap)
+library(circlize)
+
+library(GenVisR)
+
+library(msigdbr)
+library(clusterProfiler)
+
+library(patchwork)
+
+library(openxlsx)
+
+autosomal <- read_csv("/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/reference/autosomal_ranges.csv")
+
+process_fun <- params$process_fun
+source(process_fun)
+
+path_sce_input <- params$input_file
+
+patient <- params$patient
+
+cnv_colors <- c(
+  "0" = "#08519C", 
+  "1" = "#3182BD", 
+  "2" = "white", 
+  "3" = "#DE2D26", 
+  "4" = "#A50F15", 
+  "5" = "#67000D", 
+  "6" = "#2D0000"
+)
+
+rank_genes_enhanced <- function(markers) {
+  # In case any p value is 0
+  min_nonzero_p <- min(markers$p_val_adj[markers$p_val_adj > 0])
+  markers$p_val_adj[markers$p_val_adj == 0] <- min_nonzero_p / 10
+  
+  # Normalize components to 0-1 scale
+  norm_pval <- (-log10(markers$p_val_adj) - min(-log10(markers$p_val_adj))) /
+    (max(-log10(markers$p_val_adj)) - min(-log10(markers$p_val_adj)))
+  
+  norm_fc <- (markers$avg_log2FC - min(markers$avg_log2FC)) /
+    (max(markers$avg_log2FC) - min(markers$avg_log2FC))
+  
+  # Product-based score
+  markers$rank_score <- norm_pval * norm_fc
+  
+  # Sort and return
+  return(markers[order(markers$rank_score, decreasing = TRUE), ])
+}
+```
+
+```{r}
+sce <- readRDS(path_sce_input)
+sce
+```
+
+# InferCNV outputs
+
+## Subclone detection
+
+```{r}
+inferCNV_outputs <- "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/CNV_inference/inferCNV/output"
+
+inferCNV_groupings <- file.path(inferCNV_outputs,
+                                patient,
+                                "infercnv.observation_groupings.txt") %>%
+  read.table(.) %>%
+  rownames_to_column("Sample_Barcode") %>% 
+  arrange(Dendrogram.Group, Annotation.Group) %>%
+  mutate(
+    Dendrogram.Group = str_remove(Dendrogram.Group, "all_observations\\."),
+    Patient = patient,
+    Patient_Dendrogram.Group = paste0(patient, "_", Dendrogram.Group)
+  )
+
+cell_groupings <- file.path(
+  inferCNV_outputs,
+  patient,
+  "17_HMM_predHMMi6.rand_trees.hmm_mode-subclusters.cell_groupings"
+) %>%
+  read.table(.,
+             skip = 1,
+             col.names = c("cell_group_name", "Sample_Barcode")) %>% 
+  filter(!str_detect(cell_group_name, "Reference"))
+
+inferCNV_groupings <- left_join(inferCNV_groupings, cell_groupings, by = "Sample_Barcode")
+
+glimpse(inferCNV_groupings)
+```
+
+```{r}
+clone_colors <- inferCNV_groupings %>% 
+  dplyr::select("Dendrogram.Group", "Dendrogram.Color") %>% 
+  distinct() %>% 
+  column_to_rownames("Dendrogram.Group")
+
+clone_colors <- setNames(clone_colors$Dendrogram.Color, rownames(clone_colors))
+clone_colors
+```
+
+## Add subclones to SingleCellExperiment
+
+```{r}
+# subset to cells from the CNV table
+sce_patient_tumor <- sce[, inferCNV_groupings$Sample_Barcode]
+sce_patient_tumor$inferCNV_subclone <- inferCNV_groupings$Dendrogram.Group
+
+sce_patient_tumor
+```
+
+```{r}
+sce_to_seu <- sce[, sce$Patient == patient]
+rownames(sce_to_seu) <- rowData(sce_to_seu)[["ID"]]
+colData(sce_to_seu) <- colData(sce_to_seu)[, c("Patient", "Sample_Barcode")]
+seu <-
+    SeuratObject::as.Seurat(sce_to_seu, counts = "counts", data = "logcounts")
+
+seu <- infercnv::add_to_seurat(
+    seurat_obj = seu,
+    assay_name = "originalexp",
+    infercnv_output_path = file.path(inferCNV_outputs, patient),
+    top_n = 10
+  )
+
+coldata_df <- colData(sce_patient_tumor) %>% as.data.frame() %>% 
+  inner_join(., seu@meta.data, by = join_by("Patient", "Sample_Barcode"))
+rownames(coldata_df) <- coldata_df$Sample_Barcode
+
+colData(sce_patient_tumor) <- DataFrame(coldata_df)
+```
+
+```{r}
+sce_patient_tumor <- process_sce(
+  sce_patient_tumor,
+  HVF_method = "scran_mgv",
+  HVG_fdr_threshold = 0.1,
+  exclude_HVGs = NULL,
+  vars_to_regress = NULL,
+  RunPCA_npcs = 40,
+  pca_variance_threshold = 2,
+  chosen_pcs = NULL,
+  UMAP_min_dist = 0.3,
+  UMAP_n_neighbors = 30,
+  FindNeighbors_knn = 20,
+  FindClusters_res = c(0.1),
+  seed = seed
+)
+```
+
+
+```{r, fig.width=12, fig.height=5}
+plotUMAP(sce_patient_tumor,
+         color_by = "clusters_res_0.1") +
+  plotUMAP(sce_patient_tumor,
+         color_by = "tricyclePhase")
+```
+
+```{r, fig.width=12, fig.height=5, message=FALSE}
+plotUMAP(sce_patient_tumor,
+         color_by = "inferCNV_subclone",
+         other_fields = "Timepoint") +
+  facet_wrap(~ Timepoint) +
+  scale_color_manual(values = clone_colors)
+```
+
+## Subclone CNVs
+
+```{r message=FALSE}
+Chrs <- paste0("chr", c(1:22))
+
+inferCNV_clones <- inferCNV_groupings %>% 
+  dplyr::select(Dendrogram.Group, Dendrogram.Color, Patient_Dendrogram.Group, cell_group_name) %>% 
+  distinct()
+  
+inferCNV_clones <- file.path(
+  inferCNV_outputs,
+  patient,
+  "HMM_CNV_predictions.HMMi6.rand_trees.hmm_mode-subclusters.Pnorm_0.5.pred_cnv_regions.dat"
+) %>% 
+  read_table() %>% 
+  filter(!str_detect(cell_group_name, "Reference")) %>% 
+  right_join(
+    inferCNV_clones, ., 
+  ) %>% 
+  dplyr::select(
+    Patient_Dendrogram.Group, chr, start, end, state
+  ) %>% 
+  mutate(
+    chr = factor(chr, levels = Chrs)
+  ) %>% 
+  arrange(Patient_Dendrogram.Group, chr, start)
+
+merge_cnv_segments_base <- function(cnv_data) {
+  groups <- unique(cnv_data[c("Patient_Dendrogram.Group", "chr", "state")])
+  
+  result_list <- list()
+  for (i in 1:nrow(groups)) {
+    group_info <- groups[i, ]
+    
+    group_data <- cnv_data[
+      cnv_data$Patient_Dendrogram.Group == group_info$Patient_Dendrogram.Group &
+      cnv_data$chr == group_info$chr &
+      cnv_data$state == group_info$state, 
+    ]
+    
+    if (nrow(group_data) <= 1) {
+      result_list[[i]] <- group_data
+    } else {
+      ranges <- IRanges(start = group_data$start, end = group_data$end)
+      reduced_ranges <- reduce(ranges)
+      
+      result_list[[i]] <- data.frame(
+        Patient_Dendrogram.Group = rep(group_info$Patient_Dendrogram.Group, length(reduced_ranges)),
+        chr = rep(group_info$chr, length(reduced_ranges)),
+        start = start(reduced_ranges),
+        end = end(reduced_ranges),
+        state = rep(group_info$state, length(reduced_ranges))
+      )
+    }
+  }
+  
+  final_result <- do.call(rbind, result_list)
+  rownames(final_result) <- NULL
+  
+  return(final_result[order(final_result$Patient_Dendrogram.Group, final_result$chr, final_result$start), ])
+}
+
+inferCNV_clones <- merge_cnv_segments_base(inferCNV_clones) %>% 
+  mutate(cn = case_when(
+    state == 1 ~ 0,
+    state == 2 ~ 1,
+    state == 3 ~ 2,
+    state == 4 ~ 3,
+    state == 5 ~ 4,
+    state == 6 ~ 6,
+  )) %>% 
+  remove_rownames()
+
+add_cytoband_annotation <- function(inferCNV_clones, genome = "hg38") {
+  ah <- AnnotationHub()
+  cyto_query <- query(ah, c("cytoBand", genome))
+  cyto_data <- cyto_query[[1]]
+  
+  cnv_gr <- GRanges(
+    seqnames = inferCNV_clones$chr,
+    ranges = IRanges(start = inferCNV_clones$start, end = inferCNV_clones$end)
+  )
+  
+  overlaps <- findOverlaps(cnv_gr, cyto_data)
+  
+  inferCNV_clones$cytoband <- NA
+  inferCNV_clones$cytoband[queryHits(overlaps)] <- paste0(gsub("chr", "", seqnames(cyto_data)[subjectHits(overlaps)]), cyto_data$name[subjectHits(overlaps)])
+  
+  return(inferCNV_clones)
+}
+
+inferCNV_clones <- add_cytoband_annotation(inferCNV_clones)
+inferCNV_clones
+```
+
+# Plotting
+
+```{r, fig.width=8, fig.height=3.7, message=FALSE}
+clones_UMAP <- plotUMAP(sce_patient_tumor,
+         color_by = "inferCNV_subclone",
+         other_fields = "Timepoint") +
+  facet_wrap(~ Timepoint) +
+  scale_color_manual(values = clone_colors, name = "subclone") +
+  guides(color = guide_legend(override.aes = list(size = 3), title = "sub-clone")) +
+  theme_void() +
+  theme(
+    plot.margin = margin(10, 10, 10, 10),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    panel.spacing = unit(1, "cm"),
+    strip.text = element_text(size = 14, vjust = 1)
+    )
+clones_UMAP
+```
+
+```{r, fig.width=2, fig.height=10}
+cytoband_alterations <- inferCNV_clones %>% 
+  dplyr::select(Patient_Dendrogram.Group, cytoband, cn) %>% 
+  filter(cn != 2) %>% 
+  mutate(
+    clone = word(Patient_Dendrogram.Group, 2, sep = "_"),
+    .before = everything(),
+    Patient_Dendrogram.Group = NULL,
+    cytoband = case_when(
+      cn > 2 ~ paste(cytoband, "amp", sep = " "),
+      cn < 2 ~ paste(cytoband, "del", sep = " ")
+    ),
+    cn_distance = abs(cn - 2)
+  ) %>%
+  # report only the highest CN for a given cytoband
+  group_by(clone, cytoband) %>%
+  slice_max(cn_distance, n = 1, with_ties = FALSE) %>%
+  ungroup() %>% dplyr::select(-cn_distance) %>% 
+  pivot_wider(names_from = "clone", values_from = "cn", values_fill = 2) %>% 
+  column_to_rownames("cytoband") %>% 
+  as.matrix()
+# sort by cytoband
+cytoband_alterations <- cytoband_alterations[gtools::mixedsort(rownames(cytoband_alterations)), ]
+
+top_ha <- HeatmapAnnotation(
+  Clone = colnames(cytoband_alterations),
+  col = list(Clone = clone_colors),
+  annotation_height = unit(5, "mm"),
+  show_annotation_name = FALSE,
+  show_legend = FALSE
+)
+
+cytoband_heatmap <- Heatmap(
+  cytoband_alterations,
+  name = "CN",
+  col = cnv_colors,
+  
+  cluster_rows = TRUE,
+  show_row_dend = FALSE,
+  cluster_columns = TRUE,
+  
+  show_row_names = TRUE,
+  row_names_side = "left",
+  row_names_gp = gpar(fontsize = 6),
+  
+  show_column_names = TRUE,
+  column_names_side = "top",
+  column_names_rot = 0,
+  
+  top_annotation = top_ha,
+  
+  rect_gp = gpar(col = "gray", lwd = 0.5),
+  
+  heatmap_legend_param = list(
+    title = "CN",
+    at = c(0, 1, 2, 3, 4, 5, 6),
+    labels = c("0", "1", "2", "3", "4", "5", "6+"),
+    legend_height = unit(4, "cm"),
+    type = "discrete"
+  )
+)
+
+# Draw the heatmap
+draw(cytoband_heatmap)
+```
+
+```{r, fig.width=13, fig.height=2.5}
+cytoband_alterations_t <- t(cytoband_alterations)
+
+left_ha <- rowAnnotation(
+  Clone = rownames(cytoband_alterations_t),
+  col = list(Clone = clone_colors),
+  annotation_width = unit(5, "mm"),
+  show_annotation_name = FALSE,
+  show_legend = FALSE
+)
+
+cytoband_heatmap_t <- Heatmap(
+  cytoband_alterations_t,
+  name = "CN",
+  col = cnv_colors,
+  
+  cluster_rows = TRUE,
+  cluster_columns = FALSE,
+  show_row_dend = TRUE,
+  show_column_dend = FALSE,
+  
+  show_row_names = TRUE,
+  row_names_side = "left",
+  row_names_gp = gpar(fontsize = 8),
+  
+  show_column_names = TRUE,
+  column_names_side = "bottom",
+  column_names_rot = 45,
+  column_names_gp = gpar(fontsize = 6),
+  
+  left_annotation = left_ha,
+  
+  rect_gp = gpar(col = "gray", lwd = 0.5),
+  
+  heatmap_legend_param = list(
+    title = "CN",
+    at = c(0, 1, 2, 3, 4, 5, 6),
+    labels = c("0", "1", "2", "3", "4", "5", "6+"),
+    legend_height = unit(4, "cm"),
+    type = "discrete"
+  )
+)
+
+draw(cytoband_heatmap_t)
+```
+
+```{r message=FALSE, warning=FALSE, fig.width=12, fig.height=3}
+# this plot needs fixing - overlapping segments throw it off
+
+subclone_CNVmap <- inferCNV_clones %>%
+  filter(chr %in% autosomal$chromosome) %>%
+  dplyr::select(
+    "sample" = Patient_Dendrogram.Group,
+    "chromosome" = chr,
+    start,
+    end,
+    "segmean" = cn
+  ) %>%
+  mutate(sample = word(sample, 2, sep = "_")) %>%
+  
+  data.table::as.data.table() %>%
+  cnSpec(.,
+         y = autosomal,
+         genome = "hg38",
+         CNscale = "absolute") +
+  facet_grid(
+    sample ~ chromosome,
+    switch = "y",
+    scales = "free",
+    space = "free"
+  ) +
+  theme(
+    legend.position = "right",
+    panel.spacing = unit(0, "lines"),
+    strip.text.y.left = element_text(angle = 0, face = "bold"),
+    strip.text.x = element_text(size = 10),
+    plot.margin = margin(
+      t = 5.5,
+      r = 5.5,
+      b = 10.1,
+      l = 5.5,
+      unit = "pt"
+    )
+  ) +
+  scale_fill_gradientn(
+    "CN",
+    colours = cnv_colors,
+    values = scales::rescale(c(0, 1, 2, 3, 4, 5, 6)),
+    oob = scales::squish
+  ) +
+  scale_x_continuous(position = "top") +
+  labs(y = "sub-clone")
+subclone_CNVmap
+```
+
+# Differential expression
+
+```{r}
+cells_per_clone <- colData(sce_patient_tumor) %>%
+  as.data.frame() %>%
+  dplyr::select("patient" = Patient, Timepoint, Compartment, inferCNV_subclone) %>%
+  group_by(patient, Timepoint, inferCNV_subclone) %>%
+  reframe(n = n()) %>%
+  pivot_wider(
+    values_from = n,
+    names_from = Timepoint,
+    names_prefix = "cells_",
+    values_fill = 0
+  )
+cells_per_clone
+```
+
+```{r}
+if (patient == "P009"){
+  DGs_clones = c(4)
+} else if (patient == "P022"){
+  DGs_clones = 2
+} else if (patient == "P027"){
+  DGs_clones = c(3)
+} else if (patient == "P087"){
+  DGs_clones = c(3, 5, 6)
+} else if (patient == "P069"){
+  DGs_clones = c(2)
+}
+
+clone_annotation <- cells_per_clone %>%
+  filter(cells_DG > 0) %>% 
+  mutate(label = case_when(inferCNV_subclone %in% DGs_clones ~ "DGs", TRUE ~ "DGex"))
+clone_annotation
+```
+
+## Using Seurat's Wilcoxon rank-sum test
+
+```{r warning=FALSE}
+sce_patient_tumor$clone_label <- colData(sce_patient_tumor) %>%
+  as.data.frame() %>%
+  dplyr::select("patient" = Patient, Timepoint, inferCNV_subclone) %>%
+  left_join(
+    .,
+    dplyr::select(clone_annotation, inferCNV_subclone, label),
+    by = join_by(inferCNV_subclone)
+  ) %>%
+  pull(label) %>% 
+  factor(., levels = c("DGs", "DGex"))
+
+sce_DE <- sce_patient_tumor[, sce_patient_tumor$Timepoint == "DG"]
+
+rowData(sce_DE)[["Unique_Symbol"]] <- make.unique(rowData(sce_DE)[["Symbol"]])
+rownames(sce_DE) <- rowData(sce_DE)[["Unique_Symbol"]]
+seurat <- as.Seurat(sce_DE, counts = "counts", data = "logcounts")
+
+Idents(seurat) <- seurat$clone_label
+
+markers <- FindMarkers(
+  seurat,
+  ident.1 = "DGs",
+  ident.2 = "DGex",
+  test.use = "wilcox",
+  logfc.threshold = 0.1,
+  min.pct = 0.01,
+  only.pos = F,
+  random.seed = seed
+) %>%
+  rank_genes_enhanced() %>% 
+  rownames_to_column("gene")
+markers_sig <- markers %>% 
+  filter(p_val_adj < 0.01)
+markers_sig
+```
+
+## Using AUC-ranked effect sizes
+
+```{r}
+if (patient == "P027") {
+  AUC_up_thresh <- 0.6
+  logFC.cohen_thresh <- 0.25
+} else if (patient == "P069") {
+  AUC_up_thresh <- 0.55
+  logFC.cohen_thresh <- 0.25
+} else {
+  AUC_up_thresh <- 0.7
+  AUC_down_thresh <- 0.3
+  logFC.cohen_thresh <- 0.5
+}
+
+markers <- scoreMarkers(sce_DE, groups = sce_DE$clone_label, full.stats = TRUE)
+markers <- markers[["DGs"]] %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  dplyr::select(gene,
+    # средняя экспрессия в кластере
+    "self.average",
+    # средняя в остальных
+    "other.average",
+    # средний log2FC (Cohen's d)
+    "mean.logFC.cohen",
+    # средний AUC
+    "mean.AUC",
+    # % клеток где экспрессируется
+    "self.detected") %>% 
+  mutate(
+    auc_rank = rank(-mean.AUC, ties.method = "first"),
+    logfc_rank = rank(-abs(mean.logFC.cohen), ties.method = "first"),
+    combined_rank = auc_rank + 0.1 * logfc_rank
+  ) %>% 
+  mutate(
+    change = case_when(
+      mean.AUC > AUC_up_thresh & mean.logFC.cohen > logFC.cohen_thresh ~ "up",
+      mean.AUC < AUC_down_thresh & mean.logFC.cohen < logFC.cohen_thresh ~ "down",
+      TRUE ~ "ns",
+    ),
+    change = factor(change, levels = c("up", "down", "ns"))
+  )
+
+markers_sig <- markers %>%
+  filter(change != "ns") %>% 
+  arrange(change, desc(abs(mean.logFC.cohen)))
+
+markers_sig
+```
+
+```{r, fig.width=7, fig.height=6}
+ggplot(markers, aes(x = mean.logFC.cohen, y = mean.AUC)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = AUC_up_thresh,
+             linetype = "dashed",
+             color = "red") +
+  geom_hline(yintercept = AUC_down_thresh,
+             linetype = "dashed",
+             color = "blue") +
+  geom_vline(
+    xintercept = c(-logFC.cohen_thresh, logFC.cohen_thresh),
+    linetype = "dashed",
+    color = "red"
+  ) +
+  labs(y = "mean AUC", x = "mean Cohen's d")
+```
+
+
+```{r}
+markers <- arrange(markers, desc(mean.AUC))
+
+plot(
+  x = seq_along(markers$mean.AUC),
+  y = markers$mean.AUC,
+  main = "Ties in AUC score"
+)
+```
+
+```{r}
+markers <- arrange(markers, desc(mean.logFC.cohen))
+
+plot(
+  x = seq_along(markers$mean.logFC.cohen),
+  y = markers$mean.logFC.cohen,
+  main = "logFC Cohen's d"
+)
+```
+
+```{r}
+markers <- markers %>% 
+  arrange(combined_rank)
+
+plot(
+  x = seq_along(markers$combined_rank),
+  y = markers$combined_rank,
+  main = "Ordering genes by rank(AUC score) + 0.1 * rank(log2FC (Cohen's d))"
+)
+```
+
+```{r, fig.width=8, fig.height=3.7, message=FALSE}
+if(patient == "P087"){
+  one_marker <- "GTSF1"
+} else if (patient == "P009"){
+  one_marker <- "STMN1"
+} else if (patient == "P022"){
+  one_marker <- "MARCKS"
+} else {
+  one_marker <- markers[1, "gene"]
+}
+
+DE_1feature_UMAP <- plotUMAP(sce_patient_tumor,
+         color_by = one_marker,
+         other_fields = "Timepoint") +
+  facet_wrap(~ Timepoint) +
+  theme_void() +
+  theme(
+    plot.margin = margin(10, 10, 10, 10),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    panel.spacing = unit(1, "cm"),
+    strip.text = element_text(size = 14, vjust = 1)
+    )
+DE_1feature_UMAP
+```
+
+## Both DG and REL
+
+```{r,fig.width=3, fig.height=10}
+if (length(markers_sig$gene) < 50){
+  markers_plot <- markers_sig$gene
+} else {
+  markers_plot <- markers_sig %>% 
+    filter(change == "up") %>% 
+    slice_head(n = 50) %>% 
+    pull(gene)
+}
+
+gene_labels <- rep("", length(markers_plot))
+genes_to_label <- markers_plot
+gene_labels[markers_plot %in% genes_to_label] <- genes_to_label
+
+DEG_heatmap <- plotGroupedHeatmap(
+  sce_patient_tumor,
+  group = "inferCNV_subclone",
+  features = markers_plot,
+  labels_row = gene_labels,
+  cluster_cols = F,
+  cluster_rows = F,
+  center = TRUE,
+  scale = TRUE,
+  fontsize_row = 10,
+  angle_col = 0
+)
+DEG_heatmap
+```
+
+```{r, fig.width=4, fig.height=8, message=FALSE}
+DEG_dotplot <- plotDots(
+  sce_patient_tumor,
+  features = rev(markers_plot),
+  scale = TRUE,
+  center = TRUE,
+  group = "inferCNV_subclone",
+  zlim = c(-2.5, 2.5)
+) +
+  scale_color_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Average"
+  ) +
+  labs(x = NULL, y = NULL) +
+  theme(axis.text.x = element_text(angle = 0))
+DEG_dotplot
+```
+
+## Just DG
+
+```{r,fig.width=3, fig.height=10}
+if (length(markers_sig$gene) < 50){
+  markers_plot <- markers_sig$gene
+} else {
+  markers_plot <- markers_sig %>% 
+    filter(change == "up") %>% 
+    slice_head(n = 50) %>% 
+    pull(gene)
+}
+
+gene_labels <- rep("", length(markers_plot))
+genes_to_label <- markers_plot
+gene_labels[markers_plot %in% genes_to_label] <- genes_to_label
+
+plotGroupedHeatmap(
+  sce_DE,
+  group = "inferCNV_subclone",
+  features = markers_plot,
+  labels_row = gene_labels,
+  cluster_cols = F,
+  cluster_rows = F,
+  center = TRUE,
+  scale = TRUE,
+  fontsize_row = 10,
+  angle_col = 0
+)
+```
+
+```{r, fig.width=4, fig.height=8, message=FALSE}
+plotDots(
+  sce_DE,
+  features = rev(markers_plot),
+  scale = TRUE,
+  center = TRUE,
+  group = "inferCNV_subclone",
+  zlim = c(-2.5, 2.5)
+) +
+  scale_color_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Average"
+  ) +
+  labs(x = NULL, y = NULL) +
+  theme(axis.text.x = element_text(angle = 0))
+```
+
+# GSEA
+
+## Hallmark sets
+
+```{r}
+# scoreMarkers() outputs:
+gene_list <- markers$auc_rank
+names(gene_list) <- markers$gene
+```
+
+```{r}
+gene_list <- markers$auc_rank
+names(gene_list) <- markers$gene
+
+gene_list <- sort(gene_list, decreasing = TRUE)
+
+msigdbr_hallmarks_sets <- msigdbr(species = "Homo sapiens", collection = "H")
+
+gsea_hallmarks_obj <- GSEA(
+  geneList = gene_list,
+  TERM2GENE = msigdbr_hallmarks_sets[, c("gs_name", "gene_symbol")],
+  pvalueCutoff = 0.05,
+  scoreType = "pos",
+  eps = 0,
+  verbose = FALSE
+)
+gsea_hallmarks_res <- gsea_hallmarks_obj@result %>%
+  right_join(
+    dplyr::select(msigdbr_hallmarks_sets, gs_name, gs_description) %>% distinct(),
+    .,
+    by = join_by("gs_name" == "ID")
+  ) %>%
+  dplyr::select(-Description) %>%
+  filter(!is.na(setSize)) %>%
+  mutate(
+    core_count = sapply(strsplit(core_enrichment, "/"), length),
+    gene_ratio = core_count / setSize
+  ) %>%
+  arrange(desc(NES)) %>% 
+  filter(p.adjust < 0.01 & qvalue < 0.01)
+gsea_hallmarks_res
+```
+
+```{r}
+if(patient == "P009") {
+  hallmarks_categories_plot <- c(
+    "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+    "HALLMARK_MTORC1_SIGNALING",
+    "HALLMARK_TNFA_SIGNALING_VIA_NFKB",
+    "HALLMARK_PI3K_AKT_MTOR_SIGNALING",
+    "HALLMARK_MYC_TARGETS_V2",
+    "HALLMARK_HYPOXIA",
+    "HALLMARK_FATTY_ACID_METABOLISM",
+    "HALLMARK_TGF_BETA_SIGNALING",
+    "HALLMARK_NOTCH_SIGNALING"
+  )
+} else if(patient == "P022") {
+  hallmarks_categories_plot <- c(
+    "HALLMARK_MYC_TARGETS_V2",
+    "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+    "HALLMARK_MTORC1_SIGNALING",
+    "HALLMARK_PI3K_AKT_MTOR_SIGNALING",
+    "HALLMARK_TNFA_SIGNALING_VIA_NFKB",
+    "HALLMARK_TGF_BETA_SIGNALING",
+    "HALLMARK_HYPOXIA",
+    "HALLMARK_FATTY_ACID_METABOLISM",
+    "HALLMARK_NOTCH_SIGNALING"
+  )
+} else if(patient == "P027") {
+  hallmarks_categories_plot <- c(
+    "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+    "HALLMARK_MYC_TARGETS_V2",
+    "HALLMARK_MTORC1_SIGNALING",
+    "HALLMARK_PI3K_AKT_MTOR_SIGNALING",
+    "HALLMARK_TNFA_SIGNALING_VIA_NFKB",
+    "HALLMARK_TGF_BETA_SIGNALING",
+    "HALLMARK_NOTCH_SIGNALING",
+    "HALLMARK_HYPOXIA",
+    "HALLMARK_FATTY_ACID_METABOLISM"
+  )
+} else if(patient == "P087") {
+  hallmarks_categories_plot <- c(
+    "HALLMARK_MYC_TARGETS_V2",
+    "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+    "HALLMARK_TNFA_SIGNALING_VIA_NFKB",
+    "HALLMARK_TGF_BETA_SIGNALING",
+    "HALLMARK_MTORC1_SIGNALING",
+    "HALLMARK_PI3K_AKT_MTOR_SIGNALING",
+    "HALLMARK_NOTCH_SIGNALING",
+    "HALLMARK_HYPOXIA",
+    "HALLMARK_FATTY_ACID_METABOLISM"
+  )
+} else if(patient == "P069") {
+  hallmarks_categories_plot <- c(
+    "HALLMARK_MYC_TARGETS_V2",
+    "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+    "HALLMARK_TNFA_SIGNALING_VIA_NFKB",
+    "HALLMARK_TGF_BETA_SIGNALING",
+    "HALLMARK_MTORC1_SIGNALING",
+    "HALLMARK_PI3K_AKT_MTOR_SIGNALING",
+    "HALLMARK_NOTCH_SIGNALING",
+    "HALLMARK_HYPOXIA",
+    "HALLMARK_FATTY_ACID_METABOLISM"
+  )
+}
+```
+
+```{r, fig.width=6, fig.height=4}
+gene_set <- "HALLMARK_OXIDATIVE_PHOSPHORYLATION"
+plot_title <- str_remove(gene_set, "HALLMARK_") %>% 
+  str_replace_all(., "_", " ")
+
+enrichplot::gseaplot(gsea_hallmarks_obj,
+                     geneSetID = gene_set,
+                     by = "runningScore",
+                     title = plot_title)
+```
+
+```{r, fig.height=7, fig.width=10}
+gsea_hallmarks_plot <- enrichplot::gseaplot2(gsea_hallmarks_obj,
+                                             geneSetID = hallmarks_categories_plot,
+                                             subplots = 1:2)
+gsea_hallmarks_plot
+```
+
+```{r, fig.width=7.5, fig.height=4.5}
+gsea_hallmarks_dotplot <- gsea_hallmarks_res %>%
+  filter(gs_name %in% hallmarks_categories_plot) %>%
+  ggplot(., aes(x = NES, y = reorder(gs_name, NES))) +
+  geom_point(aes(size = gene_ratio, fill = qvalue),
+             color = "gray10",
+             shape = 21) +
+  scale_fill_gradient(
+    low = "red",
+    high = "gray",
+    trans = "log10",
+    name = "q-value"
+  ) +
+  scale_size_continuous(name = "Gene Ratio", range = c(3, 7)) +
+  labs(x = "Normalized Enrichment Score (NES)", y = NULL) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 12))
+gsea_hallmarks_dotplot
+```
+
+## Reactome sets
+
+```{r}
+msigdbr_reactome_sets <- msigdbr(species = "Homo sapiens",
+                        collection = "C2",
+                        subcollection = "CP:REACTOME")
+
+gsea_reactome_obj <- GSEA(
+  geneList = gene_list,
+  TERM2GENE = msigdbr_reactome_sets[, c("gs_name", "gene_symbol")],
+  pvalueCutoff = 0.05,
+  scoreType = "pos",
+  eps = 0,
+  verbose = FALSE
+)
+gsea_reactome_res <- gsea_reactome_obj@result %>%
+  right_join(
+    dplyr::select(msigdbr_reactome_sets, gs_name, gs_description) %>% distinct(),
+    .,
+    by = join_by("gs_name" == "ID")
+  ) %>%
+  dplyr::select(-Description) %>%
+  filter(!is.na(setSize)) %>%
+  mutate(
+    core_count = sapply(strsplit(core_enrichment, "/"), length),
+    gene_ratio = core_count / setSize
+  ) %>%
+  arrange(desc(NES)) %>% 
+  filter(p.adjust < 0.01 & qvalue < 0.01)
+gsea_reactome_res
+```
+
+```{r}
+gs_subset <- c(
+  "REACTOME_MAPK_FAMILY_SIGNALING_CASCADES",
+  "REACTOME_PRE_NOTCH_EXPRESSION_AND_PROCESSING",
+  "REACTOME_SIGNALING_BY_NOTCH4",
+  "REACTOME_MITOPHAGY",
+  "REACTOME_SIGNALING_BY_TGFB_FAMILY_MEMBERS"
+)
+
+qvalue_thresh <- 0.0000000001
+
+ggplot(gsea_reactome_res, aes(x = NES, y = -log10(qvalue))) +
+  geom_point() +
+  geom_point(data = filter(gsea_reactome_res, gs_name %in% gs_subset),
+             fill = "orange", color = "black", size = 3, shape = 21) +
+  geom_hline(
+    yintercept = -log10(qvalue_thresh),
+    color = "red",
+    linetype = "dashed"
+  ) +
+  geom_smooth() +
+  theme_bw()
+```
+
+```{r}
+filter(gsea_reactome_res, qvalue < qvalue_thresh) %>% 
+  arrange(qvalue)
+```
+
+```{r}
+if(patient == "P009"){
+  selected_categories <- c(
+    "REACTOME_TRANSLATION",
+    "REACTOME_NONSENSE_MEDIATED_DECAY_NMD",
+    "REACTOME_CELL_CYCLE_MITOTIC",
+    "REACTOME_SIGNALING_BY_ROBO_RECEPTORS",
+    "REACTOME_SIGNALING_BY_VEGF",
+    "REACTOME_SIGNALING_BY_WNT",
+    "REACTOME_SIGNALING_BY_NOTCH",
+    "REACTOME_TNF_SIGNALING",
+    "REACTOME_MTOR_SIGNALLING"
+  )
+} else if(patient == "P022"){
+  selected_categories <- c(
+    "REACTOME_CELL_CYCLE_MITOTIC",
+    "REACTOME_TRANSLATION",
+    "REACTOME_NONSENSE_MEDIATED_DECAY_NMD",
+    "REACTOME_SIGNALING_BY_ROBO_RECEPTORS",
+    "REACTOME_SIGNALING_BY_VEGF",
+    "REACTOME_SIGNALING_BY_WNT",
+    "REACTOME_SIGNALING_BY_NOTCH",
+    "REACTOME_TNF_SIGNALING",
+    "REACTOME_MTOR_SIGNALLING"
+  )
+} else if(patient == "P027"){
+  selected_categories <- c(
+    "REACTOME_CELL_CYCLE_MITOTIC",
+    "REACTOME_TRANSLATION",
+    "REACTOME_NONSENSE_MEDIATED_DECAY_NMD",
+    "REACTOME_SIGNALING_BY_ROBO_RECEPTORS",
+    "REACTOME_SIGNALING_BY_VEGF",
+    "REACTOME_SIGNALING_BY_WNT",
+    "REACTOME_SIGNALING_BY_NOTCH",
+    "REACTOME_TNF_SIGNALING",
+    "REACTOME_MTOR_SIGNALLING"
+  )
+} else if(patient == "P087"){
+  selected_categories <- c(
+    "REACTOME_TRANSLATION",
+    "REACTOME_NONSENSE_MEDIATED_DECAY_NMD",
+    "REACTOME_CELL_CYCLE_MITOTIC",
+    "REACTOME_SIGNALING_BY_ROBO_RECEPTORS",
+    "REACTOME_DEATH_RECEPTOR_SIGNALING",
+    "REACTOME_SIGNALING_BY_ALK_IN_CANCER",
+    "REACTOME_SIGNALING_BY_NOTCH",
+    "REACTOME_TNFR2_NON_CANONICAL_NF_KB_PATHWAY",
+    "REACTOME_MYD88_INDEPENDENT_TLR4_CASCADE"
+  )
+} else if(patient == "P069"){
+  selected_categories <- c(
+    "REACTOME_TRANSLATION",
+    "REACTOME_CELL_CYCLE_MITOTIC",
+    "REACTOME_NONSENSE_MEDIATED_DECAY_NMD",
+    "REACTOME_SIGNALING_BY_ROBO_RECEPTORS",
+    "REACTOME_KEAP1_NFE2L2_PATHWAY",
+    "REACTOME_SIGNALING_BY_NOTCH",
+    "REACTOME_TOLL_LIKE_RECEPTOR_9_TLR9_CASCADE",
+    "REACTOME_SIGNALING_BY_HEDGEHOG",
+    "REACTOME_SIGNALING_BY_WNT",
+    "REACTOME_TNFR2_NON_CANONICAL_NF_KB_PATHWAY"
+  )
+}
+```
+
+```{r, fig.width=6, fig.height=4}
+gene_set <- "REACTOME_BETA_CATENIN_INDEPENDENT_WNT_SIGNALING"
+plot_title <- str_remove(gene_set, "REACTOME_") %>% 
+  str_replace_all(., "_", " ")
+
+enrichplot::gseaplot(gsea_reactome_obj,
+                     geneSetID = gene_set,
+                     by = "runningScore",
+                     title = plot_title)
+```
+
+```{r, fig.width=10, fig.height=7}
+gsea_reactome_plot <- enrichplot::gseaplot2(gsea_reactome_obj,
+                                            geneSetID = selected_categories,
+                                            subplots = 1:2)
+gsea_reactome_plot
+```
+
+```{r, fig.width=8, fig.height=4.5}
+gsea_reactome_dotplot <- gsea_reactome_res %>%
+  filter(gs_name %in% selected_categories) %>%
+  ggplot(., aes(x = NES, y = reorder(gs_name, NES))) +
+  geom_point(aes(size = gene_ratio, fill = qvalue),
+             color = "gray10",
+             shape = 21) +
+  scale_fill_gradient(
+    low = "red",
+    high = "gray",
+    trans = "log10",
+    name = "q-value"
+  ) +
+  scale_size_continuous(name = "Gene Ratio", range = c(3, 7)) +
+  labs(x = "Normalized Enrichment Score (NES)", y = NULL) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 12))
+gsea_reactome_dotplot
+```
+
+# Save results
+
+```{r}
+outdir <- file.path("results", patient)
+dir.create(outdir, recursive = T, showWarnings = F)
+
+# CNS-annotated object
+saveRDS(sce_patient_tumor, file.path(outdir, paste0("SCE_tumor_CNVs_", patient, ".rds")))
+
+# Clones
+write.xlsx(clone_annotation, file.path(outdir, paste0("inferCNV_clones_", patient, ".xlsx")))
+ggsave(
+  file.path(outdir, paste0("UMAP_subclones_", patient, ".png")),
+  clones_UMAP,
+  width = 8,
+  height = 3.7,
+  units = "in",
+  bg = "white",
+  dpi = 300
+)
+# CNVs
+write.xlsx(inferCNV_clones, file.path(outdir, paste0("Clonal_CNV_segments_", patient, ".xlsx")))
+ggsave(
+  file.path(outdir, paste0("cytobands_long_", patient, ".png")),
+  as.ggplot(cytoband_heatmap),
+  width = 2,
+  height = 12,
+  units = "in",
+  bg = "white",
+  dpi = 300
+)
+ggsave(
+  file.path(outdir, paste0("cytobands_wide_", patient, ".png")),
+  as.ggplot(cytoband_heatmap_t),
+  width = 13,
+  height = 2.5,
+  units = "in",
+  bg = "white",
+  dpi = 300
+)
+ggsave(
+  file.path(outdir, paste0("CNVmap_", patient, ".png")),
+  subclone_CNVmap,
+  width = 12,
+  height = 3,
+  units = "in",
+  bg = "white",
+  dpi = 300
+)
+# Differential expression
+write.xlsx(markers_sig, file.path(outdir, paste0("DGs_markers_sig_", patient, ".xlsx")))
+ggsave(
+  file.path(outdir, paste0("DGs_markers_dotplot_", patient, ".png")),
+  DEG_dotplot,
+  width = 4,
+  height = 8,
+  units = "in",
+  bg = "white",
+  dpi = 300
+)
+# GSEA hallmarks
+write.xlsx(gsea_hallmarks_res, file.path(outdir, paste0("DGs_GSEA_hallmarks_", patient, ".xlsx")))
+ggsave(
+  file.path(outdir, paste0("DGs_GSEA_hallmarks_", patient, ".png")),
+  gsea_hallmarks_plot,
+  width = 10,
+  height = 7,
+  units = "in",
+  bg = "white",
+  dpi = 300
+)
+ggsave(
+  file.path(outdir, paste0("DGs_GSEA_hallmarks_dotplot_", patient, ".png")),
+  gsea_hallmarks_dotplot,
+  width = 7.5,
+  height = 4.5,
+  units = "in",
+  bg = "white",
+  dpi = 300
+)
+# GSEA reactome
+write.xlsx(gsea_reactome_res, file.path(outdir, paste0("DGs_GSEA_reactome_", patient, ".xlsx")))
+ggsave(
+  file.path(outdir, paste0("DGs_GSEA_reactome_", patient, ".png")),
+  gsea_reactome_plot,
+  width = 10,
+  height = 7,
+  units = "in",
+  bg = "white",
+  dpi = 300
+)
+ggsave(
+  file.path(outdir, paste0("DGs_GSEA_reactome_dotplot_", patient, ".png")),
+  gsea_reactome_dotplot,
+  width = 8,
+  height = 4.5,
+  units = "in",
+  bg = "white",
+  dpi = 300
+)
+```
+
+```{r}
+sessionInfo()
+```
+
+
+
+
