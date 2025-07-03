@@ -1,11 +1,3 @@
-#!/usr/bin/env Rscript
-suppressPackageStartupMessages({
-  library(Seurat)
-  library(SingleCellExperiment)
-  library(tidyverse)
-  library(scran)
-})
-
 process_sce <- function(sce,
                         rowdata = "Symbol",
                         HVF_method = "scran_mgv",
@@ -23,6 +15,13 @@ process_sce <- function(sce,
                         seed = 42,
                         return_obj = "sce"
                         ) {
+  suppressPackageStartupMessages({
+    library(Seurat)
+    library(SingleCellExperiment)
+    library(tidyverse)
+    library(scran)
+  })
+  
   if (!(return_obj %in% c("sce", "seurat"))) {
     stop("process_sce supports only these types of return_obj: sce, seurat")
   }

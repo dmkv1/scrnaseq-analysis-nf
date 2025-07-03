@@ -1,0 +1,126 @@
+---
+title: "Cell type annotation - tissues"
+params:
+  seed: 42
+  input_file: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/CellTypeAnnotation_final/SingleCellExperiment_PBMC_annotated.rds"
+  output_file: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/CellTypeAnnotation_final/SingleCellExperiment_annotated.rds"
+  sc_functions: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nxf/bin/sc_functions.R"
+output: html_notebook
+---
+
+```{r setup}
+seed <- params$seed
+set.seed(seed)
+
+# Load the libraries
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(Seurat)
+  library(scater)
+  library(scran)
+  library(tricycle)
+  library(SingleR)
+  library(celldex)
+  library(tidyverse)
+  library(patchwork)
+  library(ggridges)
+})
+
+path_sce_input <- params$input_file
+path_sce_output <- params$output_file
+
+sc_functions <- params$sc_functions
+source(sc_functions)
+```
+
+# Total cell dataset
+
+```{r load_sce}
+sce <- readRDS(path_sce_input)
+sce
+```
+
+```{r}
+ncolors <- levels(sce$cell_type_manual_broad) %>% length()
+cell_type_colors <- get_palettes(palette_name = "tableau10medium")[1:ncolors]
+names(cell_type_colors) <- levels(sce$cell_type_manual_broad)
+```
+
+
+```{r fig.width=6, fig.height=5}
+suppressMessages(
+  plotUMAP(sce, color_by = "cell_type_manual_broad") +
+  theme_void(base_size = 12) +
+  scale_color_manual(values = cell_type_colors)
+)
+```
+
+```{r}
+sce_pbmc <- sce[, sce[["Compartment"]] == "PBMC"]
+sce_pbmc
+```
+
+```{r}
+sce_pbmc <- process_sce(
+  sce_pbmc,
+  HVF_method = "seurat_vst",
+  UMAP_min_dist = 0.5,
+  FindClusters_res = c(0.1, 0.5)
+)
+```
+
+```{r fig.width=8.5, fig.height=5}
+cell_type_ratios <- sce_pbmc %>% 
+  colData() %>% as.data.frame() %>% 
+  group_by(Sample, Patient, Timepoint, Compartment, cell_type_manual_broad) %>% 
+  reframe(cells = n()) %>% 
+  group_by(Sample, Patient, Timepoint, Compartment) %>% 
+  mutate(
+    intersample.ratio = cells / sum(cells)
+  )
+
+suppressMessages(
+  plotUMAP(sce_pbmc, color_by = "cell_type_manual_broad") +
+    theme_void(base_size = 12) +
+    scale_color_manual(values = cell_type_colors) +
+    guides(color = guide_legend(override.aes = list(size = 3), title = "Cell type")) +
+    theme(legend.position = "none")
+) +
+  ggplot(cell_type_ratios,
+       aes(x = Sample, y = intersample.ratio)) +
+  geom_col(aes(fill = cell_type_manual_broad)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = NULL, fill = "Cell type", y = "Cell type ratio, %") +
+  scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
+  scale_fill_manual(values = cell_type_colors) +
+  plot_layout(widths = c(1, 0.5))
+```
+
+```{r fig.width=8.5, fig.height=5}
+cell_type_subset = "T cells - CD8+"
+
+cell_type_ratios <- sce_pbmc %>% 
+  colData() %>% as.data.frame() %>% 
+  filter(cell_type_manual_broad == cell_type_subset) %>% 
+  group_by(Sample, Patient, Timepoint, Compartment, cell_type_manual) %>% 
+  reframe(cells = n()) %>% 
+  group_by(Sample, Patient, Timepoint, Compartment) %>% 
+  mutate(
+    intersample.ratio = cells / sum(cells)
+  )
+
+ggplot(cell_type_ratios,
+       aes(x = Sample, y = intersample.ratio)) +
+  geom_col(aes(fill = cell_type_manual)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = NULL, fill = "Cell type", y = "Cell type ratio, %") +
+  scale_y_continuous(labels = scales::percent, expand = c(0, 0)) +
+  plot_layout(widths = c(1, 0.5))
+```
+
+```{r fig.width=6, fig.height=5}
+plotUMAP(sce_pbmc, color_by = "CCND1") +
+    theme_void(base_size = 12)
+```
