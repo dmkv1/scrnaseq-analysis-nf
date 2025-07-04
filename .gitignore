@@ -35,3 +35,4 @@ WES-snakemake/*
 WES-CNV-nf/*
 
 gypsum_cache/
+scrnaseq-analysis-nf_MM/
