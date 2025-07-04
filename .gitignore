@@ -33,3 +33,5 @@ CNV_inference/inferCNV/output
 
 WES-snakemake/*
 WES-CNV-nf/*
+
+gypsum_cache/
