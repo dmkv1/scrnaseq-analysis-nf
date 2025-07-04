@@ -30,3 +30,6 @@ tests/
 
 CNV_inference/SCEVAN
 CNV_inference/inferCNV/output
+
+WES-snakemake/*
+WES-CNV-nf/*
