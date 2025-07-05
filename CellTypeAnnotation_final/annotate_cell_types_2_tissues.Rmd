@@ -465,10 +465,237 @@ plotUMAP(sce_NK,
 plotContingency(sce_NK, columns = "cell_type_manual", rows = "cell_type_and_state")
 ```
 
+```{r}
+# Add subset annotations to the main set
+subset_cell_types <- sce_NK %>%
+  colData() %>% as.data.frame() %>%
+  dplyr::select(Sample_Barcode, "refined_cell_type" = cell_type_manual)
 
+mainset_cell_types <- colData(sce_TNK) %>% as.data.frame() %>%
+  dplyr::select(Sample_Barcode, cell_type_manual)
 
+sce_TNK$cell_type_manual <- left_join(mainset_cell_types, subset_cell_types, by = join_by(Sample_Barcode)) %>%
+  mutate(cell_type_manual = case_when(
+    is.na(refined_cell_type) ~ cell_type_manual,
+    TRUE ~ refined_cell_type
+  )) %>%
+  pull(cell_type_manual)
 
+data.frame(cell_type_manual = sce_TNK$cell_type_manual) %>%
+  group_by(cell_type_manual) %>%
+  reframe(N = n())
+```
 
+```{r fig.width=6, fig.height=5}
+plotUMAP(sce_TNK,
+         color_by = "cell_type_manual"
+         ) +
+  theme_void(base_size = 12) +
+  guides(color = guide_legend(override.aes = list(size = 3), title = ""))
+```
+
+### T cells
+
+```{r}
+sce_T <- sce_TNK[, sce_TNK$cell_type_manual == "NK/T cells"]
+sce_T
+```
+
+```{r}
+colData(sce_T) %>% 
+  as.data.frame() %>% 
+  group_by(Patient, Timepoint, Compartment) %>% 
+  reframe(cells = n())
+```
+
+```{r}
+sce_T <- process_sce(
+  sce_T,
+  HVF_method = "seurat_vst",
+  n_HVFs = 2000,
+  FindClusters_res = c(0.1, 0.5, 1, 1.1),
+)
+```
+
+```{r fig.width=5, fig.height=4.5}
+cluster_res <- "clusters_res_0.1"
+
+plotUMAP(sce_T,
+         color_by = cluster_res,
+         text_by = cluster_res,
+         text_size = 6
+         ) +
+  theme_void(base_size = 12) +
+  guides(color = guide_legend(override.aes = list(size = 3), title = "Cluster"))
+```
+
+```{r fig.width=15, fig.height=4.5}
+plotUMAP(sce_T, color_by = "CD8A") +
+  theme_void(base_size = 12) +
+  plotUMAP(sce_T, color_by = "CD8B") +
+  theme_void(base_size = 12) +
+  plotUMAP(sce_T, color_by = "CD4") +
+  theme_void(base_size = 12)
+```
+
+```{r, fig.width=5, fig.height=4, message=FALSE}
+marker_genes <- list(
+  "T cells" = c("CD3E", "CD3D"),
+  "NK cells" = c("NCAM1", "KLRF1", "FGFBP2", "XCL1", "KLRC3", "KLRD1", "PRF1")
+)
+
+plotDots_twotailed(
+  sce_T,
+  group = cluster_res,
+  high = c("NCAM1", "KLRF1", "FGFBP2", "XCL1", "KLRC3", "KLRD1", "PRF1"),
+  low = c("CD3E", "CD3D")
+)
+```
+
+```{r}
+markers <- effectSizeMarkers(sce_T,
+                             group = cluster_res,
+                             AUC_up_thresh = 0.6,
+                             logFC.cohen_thresh = 0.25
+                             )
+markers_to_text(markers, max_length = 60)
+```
+
+```{r, fig.width=4, fig.height=3.5}
+plotDots_twotailed(
+    sce_T,
+    group = cluster_res,
+    title = "CD8+/CD4+ T cells",
+    high = c("CD8A", "CD8B", "GZMB", "RUNX3", "EOMES", "CD247"),
+    low = c("CD4", "FOXP3", "RORC", "IL7R", "TCF7", "LDHB", "MAL"),
+    zlim = c(-2.5, 2.5)
+  )
+```
+
+```{r fig.width=10, fig.height=10}
+plotUMAP(sce_T,
+         color_by = cluster_res,
+         other_fields = c("Sample", "Compartment")
+         ) +
+  theme_bw(base_size = 14) +
+  guides(color = guide_legend(override.aes = list(size = 3), title = "Cluster")) +
+  facet_wrap(Compartment ~ Sample) +
+  labs(x = NULL, y = NULL)
+```
+
+```{r fig.width=5, fig.height=4.5}
+plotUMAP(sce_T,
+         color_by = cluster_res,
+         text_by = cluster_res,
+         text_size = 6
+         ) +
+  theme_void(base_size = 12) +
+  guides(color = guide_legend(override.aes = list(size = 3), title = "Cluster"))
+```
+
+```{r, fig.width=4, fig.height=3.5}
+plotDots_twotailed(
+    sce_T,
+    group = cluster_res,
+    title = "CD8+/CD4+ T cells",
+    high = c("CD8A", "CD8B", "GZMB", "RUNX3", "EOMES", "CD247"),
+    low = c("CD4", "FOXP3", "RORC", "IL7R", "TCF7", "LDHB", "MAL"),
+    zlim = c(-2.5, 2.5)
+  )
+```
+
+```{r fig.width=5, fig.height=4.5}
+cd8a_expr <- counts(sce_T)["CD8A", ] > 0
+cd8b_expr <- counts(sce_T)["CD8B", ] > 0
+cd4_expr <- counts(sce_T)["CD4", ] > 0
+
+sce_T[["cd8_expr"]] <- colData(sce_T) %>% 
+  as.data.frame() %>% 
+  mutate(
+    state_cd8a = cd8a_expr,
+    state_cd8b = cd8b_expr,
+    state_cd4 = cd4_expr,
+    Tcell_state = case_when(
+      (state_cd8a | state_cd8b) & !state_cd4 ~ "CD8+",
+      !(state_cd8a | state_cd8b) & state_cd4 ~ "CD4+",
+      (state_cd8a | state_cd8b) & state_cd4 ~ "CD8+; CD4+",
+      !(state_cd8a | state_cd8b) & !state_cd4 ~ "none",
+    )
+  ) %>% 
+  pull(Tcell_state)
+
+plotUMAP(sce_T,
+         color_by = "cd8_expr",
+         text_size = 6
+         ) +
+  theme_void(base_size = 12) +
+  guides(color = guide_legend(override.aes = list(size = 3), title = ""))
+```
+
+```{r}
+colData(sce_T) %>% 
+  as.data.frame() %>% 
+  group_by(cd8_expr) %>% 
+  reframe(cells = n())
+```
+
+```{r}
+sce_T$clusters <- sce_T[[cluster_res]]
+
+sce_T$cell_type_manual <- colData(sce_T) %>% 
+  as.data.frame() %>% 
+  remove_rownames() %>% 
+  dplyr::select(clusters, cd8_expr) %>% 
+  mutate(
+    cell_type_manual = case_when(
+      clusters %in% c(2, 3) | cd8_expr %in% c("CD8+") ~ "T cells - CD8+",
+      TRUE ~ "T cells - CD4+"
+    )
+  ) %>% 
+  pull(cell_type_manual)
+
+data.frame(
+  cell_type_manual = sce_T$cell_type_manual
+) %>% 
+  group_by(cell_type_manual) %>% 
+  reframe(N = n())
+```
+
+```{r fig.width=5, fig.height=4.5}
+plotUMAP(sce_T,
+         color_by = "cell_type_manual",
+         text_size = 6
+         ) +
+  theme_void(base_size = 12) +
+  guides(color = guide_legend(override.aes = list(size = 3), title = "T cells"))
+```
+
+```{r}
+# Add subset annotations to the main set
+subset_cell_types <- sce_T %>%
+  colData() %>% as.data.frame() %>%
+  dplyr::select(Sample_Barcode, "refined_cell_type" = cell_type_manual)
+
+mainset_cell_types <- colData(sce_TNK) %>% as.data.frame() %>%
+  dplyr::select(Sample_Barcode, cell_type_manual)
+
+sce_TNK$cell_type_manual <- left_join(mainset_cell_types, subset_cell_types, by = join_by(Sample_Barcode)) %>%
+  mutate(cell_type_manual = case_when(
+    is.na(refined_cell_type) ~ cell_type_manual,
+    TRUE ~ refined_cell_type
+  )) %>%
+  pull(cell_type_manual)
+
+data.frame(cell_type_manual = sce_TNK$cell_type_manual) %>%
+  group_by(cell_type_manual) %>%
+  reframe(N = n())
+```
+
+```{r fig.width=6.25, fig.height=4.5}
+plotUMAP(sce_TNK, color_by = "cell_type_manual") +
+  theme_void(base_size = 12) +
+  guides(color = guide_legend(override.aes = list(size = 3), title = ""))
+```
 
 
 
