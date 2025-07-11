@@ -1,4 +1,4 @@
-FROM rocker/rstudio:4.4.3
+FROM rocker/rstudio:4.5.1
 
 LABEL name="RStudio"
 # https://rocker-project.org/
@@ -68,12 +68,19 @@ RUN Rscript -e 'install.packages("optparse")'
 # Ambient RNA removal tools
 RUN Rscript -e 'BiocManager::install("decontX")'
 
+# DotPlots
+RUN Rscript -e 'remotes::install_github("ben-laufer/scDotPlot")'
+
 # DE tools
 RUN Rscript -e 'BiocManager::install("MAST")'
+RUN Rscript -e 'BiocManager::install("muscat")'
+RUN Rscript -e 'BiocManager::install("ROTS")'
+RUN Rscript -e 'BiocManager::install("ReactomePA")'
 
-# devtools::install_github("lhe17/nebula")
-# BiocManager::install("muscat")
-# BiocManager::install("ROTS")
-# RUN Rscript -e 'BiocManager::install("DEsingle")'
+# GSEA
+# RUN Rscript -e 'remotes::install_version("msigdbr", version = "25.1.0")'
+# RUN Rscript -e 'remotes::install_version("clusterProfiler", version = "4.16.0", repos = BiocManager::repositories())'
+
+# RUN Rscript -e 'devtools::install_github("lhe17/nebula")'
 # RUN Rscript -e 'devtools::install_github("cz-ye/DECENT")'
-# RUN Rscript -e 'BiocManager::install("ReactomePA")'
+# RUN Rscript -e 'BiocManager::install("DEsingle")'
