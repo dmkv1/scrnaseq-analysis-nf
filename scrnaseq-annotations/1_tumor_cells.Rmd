@@ -1,0 +1,363 @@
+---
+title: "Cell type annotation"
+params:
+  seed: 42
+  metadata_file: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nf/metadata_samples.csv"
+  input_file: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nf/results/SCE/SCE_clustered.rds"
+  output_file: "SCE_labeled_tumor.rds"
+  marker_genes: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nf/marker_genes/Marker_genes.csv"
+  sc_functions: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nf/bin/sc_functions.R"
+  fig_output: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/figures/fig1_complete.png"
+---
+
+```{r setup}
+seed <- params$seed
+set.seed(seed)
+
+# Load the libraries
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(Seurat)
+  library(scater)
+  library(scran)
+  library(tricycle)
+  library(tidyverse)
+  library(patchwork)
+  library(scDotPlot)
+})
+
+path_metadata <- params$metadata_file
+path_sce_input <- params$input_file
+path_sce_output <- params$output_file
+path_marker_genes <- params$marker_genes
+fig_output <- params$fig_output
+
+sc_functions <- params$sc_functions
+source(sc_functions)
+```
+
+# Metadata
+
+```{r message=FALSE}
+metadata <- read_csv(path_metadata) %>%
+  mutate(
+    Sample_Label = paste(patient, timepoint, compartment, replicate, sep = " "),
+    .after = replicate
+  )
+metadata
+```
+
+# Read the clustered dataset
+
+```{r}
+sce <- readRDS(path_sce_input)
+sce
+```
+
+```{r fig.height=9, fig.width=6.5, message=FALSE}
+cluster_res <- "clusters_res_0.5"
+
+cluster_colors <- get_palettes("tableau20")[1:length((unique(sce[[cluster_res]])))]
+names(cluster_colors) <- levels(sce[[cluster_res]])
+
+UMAP_samples <- plotUMAP(sce, color_by = "Sample_Label") +
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1), title = "Sample")) +
+  theme_void(base_size = 14) +
+  theme(
+    panel.border = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 1
+    ),
+    legend.box.background = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 0.5
+    ),
+    legend.box.margin = margin(6, 6, 6, 6),
+    plot.margin = margin(6, 6, 6, 6)
+  )
+UMAP_clusters <- plotUMAP(sce, color_by = cluster_res) +
+  scale_color_manual(values = cluster_colors) +
+  guides(color = guide_legend(
+    ncol = 2,
+    override.aes = list(size = 3, alpha = 1),
+    title = "Cluster"
+  )) +
+  theme_void(base_size = 14) +
+  theme(
+    panel.border = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 1
+    ),
+    legend.box.background = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 0.5
+    ),
+    legend.box.margin = margin(6, 6, 6, 6),
+    plot.margin = margin(6, 6, 6, 6)
+  )
+
+UMAPs_samples_clusters <- UMAP_samples +
+  UMAP_clusters +
+  patchwork::plot_layout(ncol = 1, heights = c(1, 1))
+UMAPs_samples_clusters
+```
+
+# Top-down markers
+
+```{r message=FALSE, fig.height=8, fig.width=9}
+markers <- read_csv(
+  path_marker_genes
+) %>%
+  mutate(
+    primary_cell_type = str_replace_all(primary_cell_type, "_", " ")
+  ) %>% 
+  filter(gene %in% rownames(sce))
+
+types_to_colors <- data.frame("cell_type_colors" = markers[["hex_color"]],
+                              "primary_cell_type" = markers[["primary_cell_type"]]) %>%
+  unique()
+types_to_colors <- setNames(types_to_colors$cell_type_colors,
+                            types_to_colors$primary_cell_type)
+
+rowData(sce)[["primary_cell_type"]] <- rowData(sce) %>%
+  as.data.frame() %>%
+  dplyr::select("Symbol" = "Symbol") %>%
+  left_join(., markers, by = join_by("Symbol" == "gene")) %>%
+  pull("primary_cell_type") %>%
+  factor(., levels = unique(markers[["primary_cell_type"]]))
+
+DotPlot <- sce %>%
+  scDotPlot(
+    features = rev(markers$gene),
+    featureAnno = "primary_cell_type",
+    group = cluster_res,
+    groupAnno = cluster_res,
+    annoColors = list(
+      "primary_cell_type" = types_to_colors,
+      "clusters_res_0.3" = cluster_colors
+      ),
+    clusterRows = FALSE,
+    groupLegends = FALSE,
+    fontSize = 14
+  )
+DotPlot
+```
+
+```{r}
+cell_type_assignment <- list(
+  "MCL cells SOX11+" = c(13, 16, 19, 8, 9, 21, 22, 5, 20, 2, 7),
+  "MCL cells SOX11-" = c(1, 6, 12),
+  "B cells" = c(10, 14),
+  "NK cells" = 15,
+  "T cells CD8" = c(11, 18),
+  "T cells CD8 effector memory" = 3,
+  "T cells CD4" = 4,
+  "monocytes" = 17
+)
+
+cluster_to_celltype <- character()
+for(cell_type in names(cell_type_assignment)) {
+  clusters <- cell_type_assignment[[cell_type]]
+  cluster_to_celltype[as.character(clusters)] <- cell_type
+}
+
+sce[["cell_type_manual"]] <- cluster_to_celltype[as.character(sce[[cluster_res]])]
+sce[["cell_type_manual"]] <- factor(sce[["cell_type_manual"]], levels = names(cell_type_assignment))
+
+data.frame(
+  clusters = unlist(lapply(cell_type_assignment, paste, collapse = ", "))
+)
+```
+
+```{r fig.width=12, fig.height=4, message=FALSE}
+primary_cell_type_colors <- data.frame(clusters = unlist(lapply(cell_type_assignment, paste, collapse = ", "))) %>%
+  rownames_to_column("cell_type_manual") %>%
+  left_join(
+    .,
+    select(markers, "primary_cell_type", "hex_color") %>% distinct(),
+    by = join_by("cell_type_manual" == "primary_cell_type")
+  ) %>%
+  mutate(
+    hex_color = case_when(
+      cell_type_manual == "MCL cells SOX11+" ~ "#A2A2A2",
+      cell_type_manual == "MCL cells SOX11-" ~ "#FF9E4A",
+      TRUE ~ hex_color
+    )
+  )
+cell_type_colors <- setNames(primary_cell_type_colors[["hex_color"]], primary_cell_type_colors[["cell_type_manual"]])
+
+UMAP_cell_types <- plotUMAP(sce, color_by = "cell_type_manual") +
+  scale_color_manual(values = cell_type_colors) +
+  guides(color = guide_legend(
+    ncol = 1,
+    override.aes = list(size = 3, alpha = 1),
+    title = "Cell type"
+  )) +
+  theme_void(base_size = 14) +
+  theme(
+    panel.border = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 1
+    ),
+    legend.box.background = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 0.5
+    ),
+    legend.box.margin = margin(6, 6, 6, 6),
+    plot.margin = margin(6, 6, 6, 6)
+  )
+
+UMAPs_samples_celltypes <- UMAP_samples + 
+  UMAP_cell_types + 
+  patchwork::plot_layout(ncol = 2, widths = c(1.05, 1))
+UMAPs_samples_celltypes
+```
+
+```{r fig.width=12, fig.height=4, message=FALSE}
+DotPlot_celltype <- sce %>%
+  scDotPlot(
+    features = markers$gene,
+    group = "cell_type_manual",
+    featureAnno = "primary_cell_type",
+    groupAnno = "cell_type_manual",
+    annoColors = list(
+      "primary_cell_type" = types_to_colors,
+      "cell_type_manual" = cell_type_colors
+      ),
+    groupLegends = FALSE,
+    featureLegends = FALSE,
+    clusterColumns = FALSE,
+    fontSize = 16,
+    treeWidth = 0.03,
+    annoHeight = 0.05,
+    annoWidth = 0.025,
+    flipPlot = TRUE
+  )
+DotPlot_celltype
+```
+
+```{r, fig.height=1.5, fig.width=12}
+primary_cell_type_legend <- markers %>%
+  group_by(primary_cell_type, hex_color) %>%
+  reframe(markers = n())
+
+primary_cell_type_legend[["primary_cell_type"]] <- factor(primary_cell_type_legend[["primary_cell_type"]],
+       levels = unique(markers[["primary_cell_type"]])
+       )
+
+primary_cell_type_legend_colors <- setNames(primary_cell_type_legend[["hex_color"]], primary_cell_type_legend[["primary_cell_type"]])
+
+primary_cell_type_legend <- primary_cell_type_legend %>%
+  ggplot(aes(x = markers, y = primary_cell_type, fill = primary_cell_type)) +
+  geom_col(color = "black") +
+  scale_fill_manual(values = primary_cell_type_legend_colors) +
+  theme(
+    legend.position = "bottom"
+  ) +
+  labs(fill = NULL)
+
+primary_cell_type_legend <- ggfun::get_legend(primary_cell_type_legend)
+
+legend <- ggplotify::as.ggplot(primary_cell_type_legend)
+legend
+```
+
+```{r, fig.width=9, fig.height=4}
+sample_cellType_contingency <- plotContingency(
+  sce,
+  columns = "Sample_Label",
+  rows = "cell_type_manual",
+  cluster_rows = T,
+  cluster_columns = F,
+  column_names_angle = 60
+)
+```
+
+```{r, fig.width=12, fig.height=12}
+aplot_gg <- ggplotify::as.grob(DotPlot_celltype)
+heatmap_gg <- wrap_elements(grid.grabExpr(draw(sample_cellType_contingency)))
+
+fig1 <- wrap_plots(UMAPs_samples_celltypes, ncol = 2, widths = c(0.8, 1)) +
+  legend + aplot_gg + 
+  heatmap_gg + 
+  patchwork::plot_layout(ncol = 1,
+                         heights = c(1.2, 0.3, 0.8, 1.1)) +
+  patchwork::plot_annotation(tag_levels = list(c('A', 'B', 'C', '', 'D'))) &
+  theme(plot.tag = element_text(size = 16, face = "bold"))
+fig1
+```
+
+```{r}
+png(filename = fig_output,
+    width = 12, height = 12,
+    units = "in", res = 300, bg = "white"
+    )
+fig1
+dev.off()
+```
+
+# Tumor cell label
+
+```{r}
+sce[["cell_tumor"]] <- colData(sce) %>% 
+  as.data.frame() %>% 
+  mutate(
+    cell_tumor = case_when(
+      str_detect(cell_type_manual, "^MCL cells") ~ "MCL cells",
+      TRUE ~ "Normal cells",
+    )
+  ) %>% pull(cell_tumor)
+
+colData(sce) %>% 
+  as.data.frame() %>% 
+  group_by(Sample_Label, cell_tumor) %>% 
+  reframe(cells = n()) %>% 
+  pivot_wider(names_from = cell_tumor,
+              values_from = cells)
+```
+
+```{r}
+plotUMAP(sce, color_by = "cell_tumor") +
+  guides(color = guide_legend(
+    ncol = 1,
+    override.aes = list(size = 3, alpha = 1),
+    title = ""
+  )) +
+  theme_void(base_size = 14) +
+  theme(
+    panel.border = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 1
+    ),
+    legend.box.background = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 0.5
+    ),
+    legend.box.margin = margin(6, 6, 6, 6),
+    plot.margin = margin(6, 6, 6, 6)
+  )
+```
+
+#### Save results
+
+```{r write_sce}
+saveRDS(sce, path_sce_output)
+```
+
+# Session info
+
+```{r sessionInfo}
+print(sessionInfo())
+```
+
+```{r gc}
+gc()
+```
