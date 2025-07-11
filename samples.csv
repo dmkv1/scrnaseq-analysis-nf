@@ -1,0 +1,2 @@
+﻿sample,patient,timepoint,compartment,replicate,expected_cells,nUMI_thresh,nGenes_thresh,mito_thresh,contam_thresh,raw_feature_bc_matrix
+sample1,P1,dg1,blood,1,10000,3000,300,10,0.9,/path/to/feature_barcode_matrix/
