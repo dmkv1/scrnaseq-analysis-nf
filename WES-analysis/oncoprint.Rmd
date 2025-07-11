@@ -1,0 +1,152 @@
+---
+title: "R Notebook"
+output: html_notebook
+params:
+  metadata_file: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/WES-analysis/WES_samples.xlsx"
+  WES_smk_path: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/WES-snakemake/results"
+---
+
+```{r setup}
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(openxlsx)
+})
+
+path_metadata <- params$metadata_file
+WES_smk_path <- params$WES_smk_path
+```
+
+```{r message=FALSE}
+metadata <- read.xlsx(path_metadata) %>%
+  mutate(
+    Sample_Label = paste(patient, timepoint, compartment, sep = "_"),
+    .before = sample
+  ) %>% 
+  mutate(
+    patient = factor(patient, levels = unique(patient)),
+    timepoint = factor(timepoint, levels = unique(timepoint)),
+    Sample_Label = factor(Sample_Label, levels = unique(Sample_Label)),
+  )
+metadata
+```
+
+```{r}
+metadata <- data.frame(file_path = list.files(
+  WES_smk_path,
+  recursive = T,
+  full.names = T,
+  pattern = ".xlsx$"
+)) %>%
+  mutate(sample = basename(file_path), .before = file_path) %>% 
+  mutate(sample = word(sample, 1, sep = "\\.")) %>% 
+  left_join(metadata, ., by = "sample")
+metadata
+```
+
+```{r}
+SNV_list <- list()
+for (i in seq_along(metadata[["Sample_Label"]])) {
+  samplename <- as.character(metadata[["Sample_Label"]][i])
+  file_path <- metadata[["file_path"]][i]
+  
+  SNV_list[[samplename]] <- read.xlsx(file_path)
+}
+
+SNV_df <- bind_rows(SNV_list, .id = "Sample_Label") %>%
+  left_join(dplyr::select(metadata, -file_path), ., by = join_by("Sample_Label"))
+
+SNV_df %>%
+  group_by(sample, patient, timepoint) %>%
+  reframe(
+    n = n(),
+    median_VAF = median(VAF_TUMOR),
+    sd = sd(VAF_TUMOR)
+  )
+```
+
+```{r}
+SNV_df %>%
+  group_by(Gencode_43_variantClassification, Gencode_43_secondaryVariantClassification) %>% 
+  reframe(n = n()) %>% 
+  arrange(desc(n))
+```
+
+```{r, fig.width=10, fig.height=4}
+coding_variants <- c(
+  "MISSENSE",
+  "NONSENSE",
+  "FRAME_SHIFT_DEL",
+  "FRAME_SHIFT_INS",
+  "DE_NOVO_START_OUT_FRAME",
+  "IN_FRAME_DEL",
+  "THREE_PRIME_UTR"
+)
+
+coding_variants_colors <- c(
+  "#729ECE",
+  "#FF9E4A",
+  "#67BF5C",
+  "#ED665D",
+  "#AD8BC9",
+  "#A8786E",
+  "#ED97CA",
+  "#A2A2A2",
+  "#CDCC5D",
+  "#6DCCDA"
+)
+
+coding_variants_colors <- coding_variants_colors[c(1:length(coding_variants))]
+names(coding_variants_colors) <- coding_variants
+
+SNV_coding <- filter(SNV_df, Gencode_43_variantClassification %in% coding_variants)
+
+ggplot(SNV_coding,
+       aes(y = VAF_TUMOR, x = sample, fill = Gencode_43_variantClassification)) +
+  ggbeeswarm::geom_quasirandom(shape = 21, width = 0.3) +
+  scale_fill_manual(values = coding_variants_colors) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw(base_size = 14) +
+  labs(x = NULL, y = "Variant allele frequency, %", fill = "Variant type") +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45)) +
+  guides(fill = guide_legend(override.aes = list(size = 3, alpha = 1)))
+```
+
+```{r}
+
+```
+
+
+
+
+
+
+```{r}
+oncoPrint(
+      .,
+      get_type = function(x)
+        strsplit(x, ";")[[1]],
+      col = colors.ONP,
+      heatmap_legend_param = legend.ONP,
+      alter_fun = list.ONP.alter.fun,
+      alter_fun_is_vectorized = FALSE,
+      top_annotation = top.anno,
+      right_annotation = rowAnnotation(rbar = anno_oncoprint_barplot(
+        border = TRUE,
+        axis_param = list(gp = gpar(
+          fontfamily = "sans", fontsize = 8
+        ))
+      )),
+      column_order = samples.order,
+      show_column_names = TRUE,
+      show_row_names = TRUE,
+      show_pct = TRUE,
+      column_names_gp = gpar(fontfamily = "sans", fontsize = 8),
+      row_names_gp = gpar(fontfamily = "sans", fontsize = 8),
+      pct_gp = gpar(fontfamily = "sans", fontsize = 8),
+      row_names_side = "left",
+      pct_side = "right",
+      width = ncol(.) * unit(4, "mm"),
+      height  = nrow(.) * unit(4, "mm")
+    )
+```
+
