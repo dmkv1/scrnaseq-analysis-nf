@@ -5,15 +5,18 @@
     2. Reference - `reference`, not used.
 - scRNAseq part
     1. Alignment - `scrnaseq-alignment`, performed in STARsolo.
-    2. QC, filtering, tumor cell annotation - `scrnaseq-analysis-nxf`, canned in nextflow. Result is SingleCellExperiment.
+    2. QC, filtering, tumor cell annotation - `scrnaseq-analysis-nf`, canned in nextflow. Result is SingleCellExperiment.
     3. CNV detection - `CNV_inference/inferCNV`, random trees clustering.
     4. Sub-clone comparison - `DifferentialExpression`, effect size comparison between DGs and DGex -> ranked gene list, GSEA.
-    5. Normal cell typa annotation - `CellTypeAnnotation_final`, using effect size markers to annotate cells, separately in blood and in tissues.
 - WES part
-    1. Alignment and SNV detection - `WES-snakemake`, latest main branch
-    2. CNV detection - `WES-CNV-nf`, WIP to can CNVkit bash scripts
+    1. Alignment and SNV detection - `WES-snakemake`, latest main branch.
+    2. CNV detection - `WES-CNV-nf`, WIP to can CNVkit bash scripts.
 - Other
     1. `tests` - tried benchmarking different decontamination methods. Turns out decontX is the most practical.
+
+# Container
+
+Built using the dockerfile, `rebuild.sh` is used for convenience. Should be available at docker: `dmkv/rstudio-server-scrnaseq:1.0`
 
 # Alignment
 
@@ -50,6 +53,23 @@ STAR \
 
 Only uniquiely mapped transcripts were used downstream.
 
-## HVG
-Seurat with ~2000 HVG - for strong separation by the broad traits.
-ModelGeneVar with 0.1 FDR - for revealing intricate structure based on specific co-expression patterns.
+Run `scrnaseq-alignment/zip_outputs.Rmd` - decontX expects zipped feature/barcode/matrix files.
+
+# Process and cluster cells
+
+From the `scrnaseq-analysis-nf` directory, run nextflow:
+
+```bash
+nextflow run main.nf
+```
+
+This would produce `scrnaseq-analysis-nf/results` where the cleaned and clustered SCE object would be stored.
+
+# Cell type annotation
+
+Cell types were annotated using pre-compiled set of immunological markers `scrnaseq-analysis-nf/marker_genes/Marker_genes.csv`
+
+# CNV inferennce on single cell level
+
+# Differential gene expression between clones
+
