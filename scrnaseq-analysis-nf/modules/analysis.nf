@@ -5,31 +5,32 @@ process MERGE {
     path qc_passed_sces
 
     output:
-    path 'merged.sce', emit: merged_sce
+    path "SCE_merged.rds", emit: merged_sce
 
     script:
     """
-    merge.R '${qc_passed_sces.join(',')}' merged.sce
+    merge.R '${qc_passed_sces.join(',')}' SCE_merged.rds
     """
 }
 
-process LABEL_TUMOR_CELLS {
+process JOINT_CLUSTERING {
     publishDir "${params.outdir}/SCE", mode: 'copy'
 
     input:
-    path('label_tumor_cells.Rmd')
-    path 'process_sce.R'
+    path "clustering.Rmd"
+    path "sc_functions.R"
+    path "Marker_genes.csv"
     path merged_sce
     val seed
 
     output:
-    path("label_tumor_cells.nb.html"), emit: report
-    path("annotated_tumor.sce"), emit: tumor_annotated_sce
+    path "clustering.nb.html", emit: report
+    path "SCE_clustered.rds", emit: tumor_annotated_sce
 
     script:
     """
-    Rscript -e "rmarkdown::render('label_tumor_cells.Rmd',
-                output_file = 'label_tumor_cells.nb.html',
+    Rscript -e "rmarkdown::render('clustering.Rmd',
+                output_file = 'clustering.nb.html',
                 output_format = 'html_notebook',
                 output_options = list(
                     self_contained = TRUE,
@@ -41,35 +42,9 @@ process LABEL_TUMOR_CELLS {
                 params = list(
                     seed = ${seed},
                     input_file = '${merged_sce}',
-                    output_file = 'annotated_tumor.sce',
-                    process_fun = 'process_sce.R'
+                    output_file = 'SCE_clustered.rds',
+                    sc_functions = 'sc_functions.R',
+                    marker_genes = 'Marker_genes.csv'
                     ))"
-    """
-}
-
-process INFERCNV {
-    tag "${patient_id}"
-    publishDir "${params.outdir}/inferCNV/${patient_id}", mode: 'copy'
-
-    input:
-    tuple val(patient_id), val(k_obs_groups)
-    path annotated_sce
-    path reference_gencode
-    val seed
-
-    output:
-    path("infercnv.png"), emit: infercnv_plot
-
-    script:
-    """
-    run_inferCNV.R \
-        -i '${annotated_sce}' \
-        --patient '${patient_id}' \
-        --k_obs_groups '${k_obs_groups}' \
-        --hg38_gencode '${reference_gencode}'\
-        --tumor_annotation 'MCL cell' \
-        --tumor_label 'MCL' \
-        --num_threads '${params.inferCNV.threads}' \
-        --seed ${seed}
     """
 }

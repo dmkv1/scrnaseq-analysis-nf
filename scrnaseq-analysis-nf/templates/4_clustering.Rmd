@@ -1,0 +1,287 @@
+---
+title: "Joined dataset clustering"
+params:
+  seed: 42
+  metadata_file: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nf/metadata_samples.csv"
+  input_file: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nf/results/SCE/merged.sce"
+  marker_genes: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/Marker_genes/Marker_genes.csv"
+  sc_functions: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nf/bin/sc_functions.R"
+  output_file: "annotated.sce"
+---
+
+```{r setup}
+seed <- params$seed
+set.seed(seed)
+
+# Load the libraries
+suppressPackageStartupMessages({
+  library(SingleCellExperiment)
+  library(Seurat)
+  library(scater)
+  library(scran)
+  library(tricycle)
+  library(tidyverse)
+  library(patchwork)
+  library(scDotPlot)
+})
+
+path_metadata <- params$metadata_file
+path_sce_input <- params$input_file
+path_sce_output <- params$output_file
+path_marker_genes <- params$marker_genes
+fig_output <- params$fig_output
+
+sc_functions <- params$sc_functions
+source(sc_functions)
+```
+
+# Read the merged dataset
+
+```{r}
+sce <- readRDS(path_sce_input)
+sce
+```
+
+
+# Read the metadata
+
+```{r message=FALSE}
+metadata <- read_csv(path_metadata) %>%
+  mutate(
+    Sample_Label = paste(patient, timepoint, compartment, replicate, sep = " "),
+    .after = replicate
+  )
+metadata
+```
+
+# Assign full sample labels
+
+```{r load_sce}
+sce$Sample_Label <- colData(sce) %>% 
+  as.data.frame() %>% 
+  mutate(
+    Sample_Label = paste(Patient, Timepoint, Compartment, Replicate, sep = " "),
+    Sample_Label = factor(Sample_Label, levels = metadata$Sample_Label)
+  ) %>% 
+  pull(Sample_Label)
+sce
+```
+
+# Re-check QC
+
+```{r, fig.width=10, fig.height=10}
+plotColData(sce,
+            x = "Sample_Label",
+            y = "sum",
+            color_by = "discard") +
+  scale_y_continuous(trans = "log10") +
+  theme(legend.position = "none",
+        axis.text.x = element_text(hjust = 1, angle = 45)) +
+  labs(y = "UMIs per cell, log10", x = NULL) +
+  
+  plotColData(sce,
+              x = "Sample_Label",
+              y = "detected",
+              color_by = "discard") +
+  scale_y_continuous(trans = "log10") +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45)) +
+  labs(y = "Genes per cell, log10", x = NULL) +
+  
+  plotColData(sce,
+              x = "Sample_Label",
+              y = "subsets_Mito_percent",
+              color_by = "discard") +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, by = 10)) +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45), legend.position = "none") +
+  labs(y = "% mitochondrial genes", x = NULL) +
+  
+  plot_layout(ncol = 1)
+```
+
+```{r}
+sce <- sce[, !colData(sce)$discard]
+```
+
+# Jointly re-cluster
+
+```{r process_sce}
+sce <- process_sce(
+  sce,
+  HVF_method = "scran_mgv",
+  HVF_fdr_threshold = 0.1,
+  pca_variance_threshold = 1.5,
+  FindClusters_res = c(0.5),
+  return_obj = "sce",
+  seed = seed
+)
+sce
+```
+
+## Cell cycle scoring
+
+```{r project_cycle_space, fig.width=7, fig.height=5}
+sce <- project_cycle_space(sce,
+                           species = "human",
+                           gname.type = "SYMBOL")
+
+center_PCs <- c(-3, 0.4)
+
+sce <- estimate_cycle_position(sce,
+                               center.pc1 = center_PCs[1],
+                               center.pc2 = center_PCs[2])
+
+p <- plot_emb_circle_scale(sce,
+                           dimred = "tricycleEmbedding",
+                           point.size = 3.5,
+                           point.alpha = 0.9) +
+  annotate(
+    "point",
+    x = center_PCs[1],
+    y = center_PCs[2],
+    size = 4,
+    color = "red",
+    shape = 8,
+    stroke = 1
+  ) +
+  labs(title = NULL) +
+  theme_bw(base_size = 14)
+pi_legend <- circle_scale_legend(text.size = 4.5, alpha = 0.9)
+cowplot::plot_grid(p, pi_legend, ncol = 2, rel_widths = c(1, 0.4))
+```
+
+```{r tricycle_phases, fig.width=6, fig.height=5}
+phases = c(
+  "G1" = 0.2 * pi,
+  "S" = 0.8 * pi,
+  "G2.M" = 1 * pi,
+  "G0" = 1.8 * pi
+)
+
+# Map position to phase
+TCP.df <- data.frame(colname = colnames(sce),
+                     TCP = sce$tricyclePosition,
+                     Phase = NA
+                     )
+for(position in names(phases)){
+  TCP.df[TCP.df$TCP > phases[[position]] ,]$Phase <- position
+}
+TCP.df[is.na(TCP.df$Phase), ]$Phase <- "G0"
+TCP.df$Phase <- factor(TCP.df$Phase,
+                       levels = c("G0", "G1", "S", "G2.M") )
+
+sce$tricyclePhase <- TCP.df$Phase
+
+ggcells(sce,
+        mapping = aes(x = tricycleEmbedding.1,
+                      y = tricycleEmbedding.2
+                      )
+        ) +
+  geom_point(
+    aes(color = tricyclePhase)
+  ) +
+  geom_density2d(
+    data = as.data.frame(reducedDims(sce)[["tricycleEmbedding"]]),
+    aes(x = PC1, y = PC2), adjust = 2,
+    color = "black"
+  ) +
+  annotate("point",
+           x = center_PCs[1],
+           y = center_PCs[2],
+           size = 4,
+           color = "black", shape = 4,
+           stroke = 1
+           )
+```
+
+```{r, fig.width=6, fig.height=5}
+plotUMAP(sce,
+         color_by = "tricyclePhase") +
+  guides(color = guide_legend(
+    ncol = 2,
+    override.aes = list(size = 3, alpha = 1),
+    title = "Cell cycle phase"
+  )) +
+  theme_void(base_size = 14) +
+  theme(
+    panel.border = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 1
+    ),
+    legend.box.background = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 0.5
+    ),
+    legend.box.margin = margin(6, 6, 6, 6),
+    plot.margin = margin(6, 6, 6, 6)
+  )
+```
+
+```{r fig.height=9, fig.width=6.5, message=FALSE}
+cluster_res <- "clusters_res_0.5"
+
+cluster_colors <- get_palettes("tableau20")[1:length((unique(sce[[cluster_res]])))]
+names(cluster_colors) <- levels(sce[[cluster_res]])
+
+UMAP_samples <- plotUMAP(sce, color_by = "Sample_Label") +
+  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1), title = "Sample")) +
+  theme_void(base_size = 14) +
+  theme(
+    panel.border = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 1
+    ),
+    legend.box.background = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 0.5
+    ),
+    legend.box.margin = margin(6, 6, 6, 6),
+    plot.margin = margin(6, 6, 6, 6)
+  )
+UMAP_clusters <- plotUMAP(sce, color_by = cluster_res) +
+  scale_color_manual(values = cluster_colors) +
+  guides(color = guide_legend(
+    ncol = 2,
+    override.aes = list(size = 3, alpha = 1),
+    title = "Cluster"
+  )) +
+  theme_void(base_size = 14) +
+  theme(
+    panel.border = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 1
+    ),
+    legend.box.background = element_rect(
+      color = "gray10",
+      fill = NA,
+      linewidth = 0.5
+    ),
+    legend.box.margin = margin(6, 6, 6, 6),
+    plot.margin = margin(6, 6, 6, 6)
+  )
+
+UMAPs_samples_clusters <- UMAP_samples +
+  UMAP_clusters +
+  patchwork::plot_layout(ncol = 1, heights = c(1, 1))
+UMAPs_samples_clusters
+```
+
+#### Save results
+
+```{r write_sce}
+saveRDS(sce, path_sce_output)
+```
+
+# Session info
+
+```{r sessionInfo}
+print(sessionInfo())
+```
+
+```{r gc}
+gc()
+```

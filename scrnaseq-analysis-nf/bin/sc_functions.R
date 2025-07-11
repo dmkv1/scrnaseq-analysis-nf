@@ -1,3 +1,138 @@
+# QC plotting functions
+basic_QC_plots <- function(sce,
+                           color_groups,
+                           nUMI_thresh,
+                           nGenes_thresh,
+                           mito_thresh) {
+  line_color = "grey20"
+  
+  scater::plotColData(sce, y = "sum", color_by = color_groups) +
+    scale_y_continuous(trans = "log10") +
+    geom_hline(yintercept = nUMI_thresh,
+               linetype = "dashed",
+               color = line_color) +
+    theme(legend.position = "none") +
+    labs(y = "UMIs per cell, log10",
+         title = paste("nUMI threshold:", nUMI_thresh)) +
+    
+    scater::plotColData(sce, y = "detected", color_by = color_groups) +
+    scale_y_continuous(trans = "log10") +
+    geom_hline(yintercept = nGenes_thresh,
+               linetype = "dashed",
+               color = line_color) +
+    theme(legend.position = "none") +
+    labs(y = "Genes per cell, log10",
+         title = paste("nGenes threshold:", nGenes_thresh)) +
+    
+    scater::plotColData(sce, y = "subsets_Mito_percent", color_by = color_groups) +
+    scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, by = 5)) +
+    geom_hline(yintercept = mito_thresh,
+               linetype = "dashed",
+               color = line_color) +
+    labs(y = "% mitochondrial genes",
+         title = paste("% mito threshold:", mito_thresh))
+}
+
+advanced_QC_plots <- function(sce,
+                              color_groups,
+                              nUMI_thresh,
+                              nGenes_thresh,
+                              mito_thresh) {
+  line_color = "grey20"
+  
+  scater::plotColData(sce, y = "libComplexity", color_by = color_groups) +
+    labs(y = "log10(nGenes) / log10(nUMIs)") +
+    theme(legend.position = "none") +
+    
+    scater::plotColData(sce, y = "subsets_Ribo_percent", color_by = color_groups) + scale_y_continuous(limits = c(0, 100)) +
+    labs(y = "% ribosomal genes") +
+    theme(legend.position = "none") +
+    
+    scater::plotColData(sce, y = "Mito_Ribo_Ratio", color_by = color_groups) +
+    labs(y = "%Mito / (%Mito + %Ribo)") +
+    
+    scater::plotColData(sce,
+                        x = "sum",
+                        y = "detected",
+                        color_by = color_groups) +
+    scale_x_continuous(trans = "log10") +
+    scale_y_continuous(trans = "log10") +
+    geom_vline(xintercept = nUMI_thresh,
+               linetype = "dashed",
+               color = line_color) +
+    geom_hline(yintercept = nGenes_thresh,
+               linetype = "dashed",
+               color = line_color) +
+    labs(x = "UMIs per cell, log10", y = "Genes per cell, log10") +
+    theme(legend.position = "none") +
+    
+    scater::plotColData(sce,
+                        x = "detected",
+                        y = "libComplexity",
+                        color_by = color_groups) +
+    scale_x_continuous(trans = "log10") +
+    geom_vline(xintercept = nGenes_thresh,
+               linetype = "dashed",
+               color = line_color) +
+    labs(x = "Genes per cell, log10", y = "log10(nGenes) / log10(nUMIs)") +
+    theme(legend.position = "none") +
+    
+    scater::plotColData(sce,
+                        x = "detected",
+                        y = "Mito_Ribo_Ratio",
+                        color_by = color_groups) +
+    scale_x_continuous(trans = "log10") +
+    geom_vline(xintercept = nGenes_thresh,
+               linetype = "dashed",
+               color = line_color) +
+    labs(x = "Genes per cell, log10", y = "%Mito / (%Mito + %Ribo)") +
+    theme(legend.position = "none")
+}
+
+contam_QC_plots <- function(sce,
+                            color_groups,
+                            contam_threshold,
+                            nUMI_thresh,
+                            nGenes_thresh,
+                            mito_thresh) {
+  scater::plotColData(sce, y = "contamination", color_by = color_groups) +
+    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.1)) +
+    geom_hline(yintercept = contam_threshold, linetype = "dashed") +
+    theme(legend.position = "none") +
+    labs(y = "Contamination ratio",
+         title = paste("Contamination threshold:", contam_threshold)) +
+    
+    scater::plotColData(sce,
+                        x = "sum",
+                        y = "contamination",
+                        color_by = color_groups) +
+    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
+    scale_x_continuous(trans = "log10") +
+    geom_hline(yintercept = contam_threshold, linetype = "dashed") +
+    geom_vline(xintercept = nUMI_thresh, linetype = "dashed") +
+    labs(x = "UMIs per cell, log10", y = "Contamination ratio") +
+    theme(legend.position = "none") +
+    
+    scater::plotColData(sce,
+                        x = "detected",
+                        y = "contamination",
+                        color_by = color_groups) +
+    scale_x_continuous(trans = "log10") +
+    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
+    geom_hline(yintercept = contam_threshold, linetype = "dashed") +
+    geom_vline(xintercept = nGenes_thresh, linetype = "dashed") +
+    labs(x = "Genes per cell, log10", y = "Contamination ratio") +
+    theme(legend.position = "none") +
+    
+    scater::plotColData(sce,
+                        x = "libComplexity",
+                        y = "contamination",
+                        color_by = color_groups) +
+    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
+    geom_hline(yintercept = contam_threshold, linetype = "dashed") +
+    labs(x = "log10(nGenes) / log10(nUMIs)", y = "Contamination ratio")
+}
+
 # Reduce SCE dimentions and find clusters
 process_sce <- function(sce,
                         rowdata = "Symbol",
@@ -350,7 +485,8 @@ markers_to_text <- function(markers,
 }
 
 # Сontingency heatmap between two cell labels
-plotContingency <- function(sce, columns = "cell_type_manual", rows = "cell_type_conv", column_names_angle = 45) {
+plotContingency <- function(sce, columns = "cell_type_manual", rows = "cell_type_conv", column_names_angle = 45,
+                            cluster_columns = TRUE, cluster_rows = TRUE) {
   suppressPackageStartupMessages(library(ComplexHeatmap))
   
   contingency_matrix  <- colData(sce) %>%
@@ -369,6 +505,8 @@ plotContingency <- function(sce, columns = "cell_type_manual", rows = "cell_type
       grid.text(contingency_matrix[i, j], x, y, gp = gpar(fontsize = 10, col = "black"))
     },
     col = color_fun,
+    cluster_columns = cluster_columns,
+    cluster_rows = cluster_rows,
     clustering_method_rows = "ward.D2",
     clustering_method_columns = "ward.D2",
     name = "Count",
@@ -378,6 +516,27 @@ plotContingency <- function(sce, columns = "cell_type_manual", rows = "cell_type
   
   draw(ht)
 }
+
+# Product-Based Ranking with Normalization 
+rank_genes_enhanced <- function(markers) {
+  # In case any p value is 0
+  min_nonzero_p <- min(markers$p_val_adj[markers$p_val_adj > 0])
+  markers$p_val_adj[markers$p_val_adj == 0] <- min_nonzero_p / 10
+  
+  # Normalize components to 0-1 scale
+  norm_pval <- (-log10(markers$p_val_adj) - min(-log10(markers$p_val_adj))) /
+    (max(-log10(markers$p_val_adj)) - min(-log10(markers$p_val_adj)))
+  
+  norm_fc <- (markers$avg_log2FC - min(markers$avg_log2FC)) /
+    (max(markers$avg_log2FC) - min(markers$avg_log2FC))
+  
+  # Product-based score
+  markers$rank_score <- norm_pval * norm_fc
+  
+  # Sort and return
+  return(markers[order(markers$rank_score, decreasing = TRUE), ])
+}
+
 
 ############ Comparison between conditions
 

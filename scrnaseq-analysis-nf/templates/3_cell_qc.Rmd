@@ -5,12 +5,13 @@ params:
   path_sce_input: "../results/QC/P069_REL_GUT/3_doublets/P069_REL_GUT_singlets.sce"
   path_perCellCont: "../results/QC/P069_REL_GUT/2_ambientRNA/P069_REL_GUT_perCellCont.rds"
   path_sce_output: "test_sce.rds"
+  path_sce_output_cleaned: "test_sce_cleaned.rds"
   nUMI_thresh: 1000
   nGenes_thresh: 600
   mito_thresh: 20
   contam_thresh: 0.75
   cluster_discard_thresh: 0.33
-  process_fun: "../bin/process_sce.R"
+  process_fun: "../bin/sc_functions.R"
   seed: 42
 ---
 
@@ -19,6 +20,7 @@ sample_id <- params$sample_id
 path_sce_input <- params$path_sce_input
 path_perCellCont <- params$path_perCellCont
 path_sce_output <- params$path_sce_output
+path_sce_output_cleaned <- params$path_sce_output_cleaned
 
 # thresholds
 nUMI_thresh <- as.numeric(params$nUMI_thresh)
@@ -43,141 +45,6 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(patchwork)
 })
-
-# QC plotting functions
-basic_QC_plots <- function(sce,
-                           color_groups,
-                           nUMI_thresh,
-                           nGenes_thresh,
-                           mito_thresh) {
-  line_color = "grey20"
-  
-  scater::plotColData(sce, y = "sum", color_by = color_groups) +
-    scale_y_continuous(trans = "log10") +
-    geom_hline(yintercept = nUMI_thresh,
-               linetype = "dashed",
-               color = line_color) +
-    theme(legend.position = "none") +
-    labs(y = "UMIs per cell, log10",
-         title = paste("nUMI threshold:", nUMI_thresh)) +
-    
-    scater::plotColData(sce, y = "detected", color_by = color_groups) +
-    scale_y_continuous(trans = "log10") +
-    geom_hline(yintercept = nGenes_thresh,
-               linetype = "dashed",
-               color = line_color) +
-    theme(legend.position = "none") +
-    labs(y = "Genes per cell, log10",
-         title = paste("nGenes threshold:", nGenes_thresh)) +
-    
-    scater::plotColData(sce, y = "subsets_Mito_percent", color_by = color_groups) +
-    scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, by = 5)) +
-    geom_hline(yintercept = mito_thresh,
-               linetype = "dashed",
-               color = line_color) +
-    labs(y = "% mitochondrial genes",
-         title = paste("% mito threshold:", mito_thresh))
-}
-
-advanced_QC_plots <- function(sce,
-                              color_groups,
-                              nUMI_thresh,
-                              nGenes_thresh,
-                              mito_thresh) {
-  line_color = "grey20"
-  
-  scater::plotColData(sce, y = "libComplexity", color_by = color_groups) +
-    labs(y = "log10(nGenes) / log10(nUMIs)") +
-    theme(legend.position = "none") +
-    
-    scater::plotColData(sce, y = "subsets_Ribo_percent", color_by = color_groups) + scale_y_continuous(limits = c(0, 100)) +
-    labs(y = "% ribosomal genes") +
-    theme(legend.position = "none") +
-    
-    scater::plotColData(sce, y = "Mito_Ribo_Ratio", color_by = color_groups) +
-    labs(y = "%Mito / (%Mito + %Ribo)") +
-    
-    scater::plotColData(sce,
-                        x = "sum",
-                        y = "detected",
-                        color_by = color_groups) +
-    scale_x_continuous(trans = "log10") +
-    scale_y_continuous(trans = "log10") +
-    geom_vline(xintercept = nUMI_thresh,
-               linetype = "dashed",
-               color = line_color) +
-    geom_hline(yintercept = nGenes_thresh,
-               linetype = "dashed",
-               color = line_color) +
-    labs(x = "UMIs per cell, log10", y = "Genes per cell, log10") +
-    theme(legend.position = "none") +
-    
-    scater::plotColData(sce,
-                        x = "detected",
-                        y = "libComplexity",
-                        color_by = color_groups) +
-    scale_x_continuous(trans = "log10") +
-    geom_vline(xintercept = nGenes_thresh,
-               linetype = "dashed",
-               color = line_color) +
-    labs(x = "Genes per cell, log10", y = "log10(nGenes) / log10(nUMIs)") +
-    theme(legend.position = "none") +
-    
-    scater::plotColData(sce,
-                        x = "detected",
-                        y = "Mito_Ribo_Ratio",
-                        color_by = color_groups) +
-    scale_x_continuous(trans = "log10") +
-    geom_vline(xintercept = nGenes_thresh,
-               linetype = "dashed",
-               color = line_color) +
-    labs(x = "Genes per cell, log10", y = "%Mito / (%Mito + %Ribo)") +
-    theme(legend.position = "none")
-}
-
-contam_QC_plots <- function(sce,
-                            color_groups,
-                            contam_threshold,
-                            nUMI_thresh,
-                            nGenes_thresh,
-                            mito_thresh) {
-  scater::plotColData(sce, y = "contamination", color_by = color_groups) +
-    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.1)) +
-    geom_hline(yintercept = contam_threshold, linetype = "dashed") +
-    theme(legend.position = "none") +
-    labs(y = "Contamination ratio",
-         title = paste("Contamination threshold:", contam_threshold)) +
-    
-    scater::plotColData(sce,
-                        x = "sum",
-                        y = "contamination",
-                        color_by = color_groups) +
-    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
-    scale_x_continuous(trans = "log10") +
-    geom_hline(yintercept = contam_threshold, linetype = "dashed") +
-    geom_vline(xintercept = nUMI_thresh, linetype = "dashed") +
-    labs(x = "UMIs per cell, log10", y = "Contamination ratio") +
-    theme(legend.position = "none") +
-    
-    scater::plotColData(sce,
-                        x = "detected",
-                        y = "contamination",
-                        color_by = color_groups) +
-    scale_x_continuous(trans = "log10") +
-    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
-    geom_hline(yintercept = contam_threshold, linetype = "dashed") +
-    geom_vline(xintercept = nGenes_thresh, linetype = "dashed") +
-    labs(x = "Genes per cell, log10", y = "Contamination ratio") +
-    theme(legend.position = "none") +
-    
-    scater::plotColData(sce,
-                        x = "libComplexity",
-                        y = "contamination",
-                        color_by = color_groups) +
-    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
-    geom_hline(yintercept = contam_threshold, linetype = "dashed") +
-    labs(x = "log10(nGenes) / log10(nUMIs)", y = "Contamination ratio")
-}
 ```
 
 # Read the sce
@@ -313,10 +180,8 @@ contam_QC_plots(sce, "discard", contam_threshold, nUMI_thresh, nGenes_thresh, mi
 sce <- process_sce(
   sce,
   HVF_method = "seurat_vst",
-  n_HVGs = 2000,
-  RunPCA_npcs = 50,
+  n_HVFs = 2000,
   chosen_pcs = 20,
-  pca_variance_threshold = 1,
   FindClusters_res = 1,
   seed = seed
 )
@@ -420,8 +285,10 @@ Sample `r metrics$sample_id` has `r metrics$qc_cells` cells which passed QC and 
 # Write outputs
 
 ```{r writing_outputs}
-sce_clean <- sce[, !colData(sce)$discard]
-saveRDS(sce_clean, path_sce_output)
+saveRDS(sce, path_sce_output)
+
+sce_cleaned <- sce[, !colData(sce)$discard]
+saveRDS(sce_cleaned, path_sce_output_cleaned)
 
 writeLines(jsonlite::toJSON(metrics, pretty=TRUE), paste0(sample_id, "_cell_QC_metrics.json"))
 ```

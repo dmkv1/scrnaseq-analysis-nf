@@ -9,7 +9,7 @@ process DROPLETS_TO_CELLS {
 
     output:
     tuple val(sample_id), path("${sample_id}_droplets_to_cells.nb.html"), emit: report
-    tuple val(sample_id), path("${sample_id}_cells.sce"), emit: sce
+    tuple val(sample_id), path("SCE_${sample_id}_cells.rds"), emit: sce
     tuple val(sample_id), path('filtered_feature_bc_matrix/'), emit: filtered_fbmtx
     tuple val(sample_id), path("${sample_id}_droplet_metrics.json"), emit: metrics
 
@@ -30,7 +30,7 @@ process DROPLETS_TO_CELLS {
                                path_sce_input = '${sce}',
                                expected_cells = '${expected_cells}',
                                FDR_thresh = '${params.droplets.FDR_thresh}',
-                               path_sce_output = '${sample_id}_cells.sce',
+                               path_sce_output = 'SCE_${sample_id}_cells.rds',
                                seed = ${seed}
                              ))"
     """
@@ -71,7 +71,7 @@ process DOUBLET_DETECTION {
 
     output:
     tuple val(sample_id), path("${sample_id}_doublets.nb.html"), emit: report
-    tuple val(sample_id), path("${sample_id}_singlets.sce"), emit: sce
+    tuple val(sample_id), path("SCE_${sample_id}_singlets.rds"), emit: sce
     tuple val(sample_id), path("${sample_id}_doublet_metrics.json"), emit: metrics
 
     script:
@@ -89,7 +89,7 @@ process DOUBLET_DETECTION {
                 params = list(
                                sample_id = '${sample_id}',
                                path_sce_input = '${sce}',
-                               path_sce_output = '${sample_id}_singlets.sce',
+                               path_sce_output = 'SCE_${sample_id}_singlets.rds',
                                seed = ${seed}
                              ))"
     """
@@ -101,13 +101,14 @@ process CELL_QC {
 
     input:
     path 'cell_qc.Rmd'
-    path 'process_sce.R'
+    path 'sc_functions.R'
     tuple val(sample_id), path(sce), val(nUMI_thresh), val(nGenes_thresh), val(mito_thresh), val(contam_thresh), path(perCellCont)
     val seed
 
     output:
     tuple val(sample_id), path("${sample_id}_cell_QC.nb.html"), emit: report
-    path("${sample_id}.sce"), emit: sce
+    path ("SCE_${sample_id}.rds"), emit: sce
+    path ("SCE_${sample_id}_cleaned.rds"), emit: sce_cleaned
     tuple val(sample_id), path("${sample_id}_cell_QC_metrics.json"), emit: metrics
 
     script:
@@ -125,14 +126,15 @@ process CELL_QC {
                 params = list(
                     sample_id = '${sample_id}',
                     path_sce_input = '${sce}',
-                    path_sce_output = '${sample_id}.sce',
+                    path_sce_output = 'SCE_${sample_id}.rds',
+                    path_sce_output_cleaned = 'SCE_${sample_id}_cleaned.rds',
                     path_perCellCont = '${sample_id}_perCellCont.rds',
                     nUMI_thresh = '${nUMI_thresh}',
                     nGenes_thresh = '${nGenes_thresh}',
                     mito_thresh = '${mito_thresh}',
                     contam_thresh = '${contam_thresh}',
                     cluster_discard_thresh = '${params.qc.cluster_discard_thresh}',
-                    process_fun = 'process_sce.R',
+                    process_fun = 'sc_functions.R',
                     seed = ${seed}
                     ))"
     """

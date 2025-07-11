@@ -11,8 +11,7 @@ include { DOUBLET_DETECTION } from './modules/qc'
 include { CELL_QC } from './modules/qc'
 // Merged analysis
 include { MERGE } from './modules/analysis'
-include { LABEL_TUMOR_CELLS } from './modules/analysis'
-include { INFERCNV } from './modules/analysis'
+include { JOINT_CLUSTERING } from './modules/analysis'
 
 workflow {
     seed = Channel.value(params.seed)
@@ -101,7 +100,7 @@ workflow {
 
     CELL_QC(
         file("templates/3_cell_qc.Rmd"),
-        file("bin/process_sce.R"),
+        file("bin/sc_functions.R"),
         DOUBLET_DETECTION.out.sce.join(ch_qc_params).join(AMBIENT_RNA.out.perCellCont),
         seed,
     )
@@ -110,12 +109,11 @@ workflow {
         CELL_QC.out.sce.collect()
     )
 
-    if (params.tumor_labelled) {
-        LABEL_TUMOR_CELLS(
-            file("templates/4_label_tumor_cells.Rmd"),
-            file("bin/process_sce.R"),
-            MERGE.out.merged_sce,
-            seed,
-        )
-    }
+    JOINT_CLUSTERING(
+        file("templates/4_clustering.Rmd"),
+        file("bin/sc_functions.R"),
+        file("marker_genes/Marker_genes.csv"),
+        MERGE.out.merged_sce,
+        seed,
+    )
 }

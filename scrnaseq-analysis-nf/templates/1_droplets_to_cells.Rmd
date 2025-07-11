@@ -62,9 +62,6 @@ plot(
   xlab = "Rank",
   ylab = "Total"
 )
-o <- order(barcode_ranks$rank)
-lines(barcode_ranks$rank[o], barcode_ranks$fitted[o], col = "red")
-
 abline(
   h = metadata(barcode_ranks)$knee,
   col = "dodgerblue",
@@ -102,7 +99,7 @@ droplet_stats$is_cell[droplet_stats$FDR < FDR_thresh] <- TRUE
 Number of detected cells:
 
 ```{r}
-is.cell <- droplet_stats_raw$FDR <= FDR_thresh
+is.cell <- droplet_stats_raw$FDR < FDR_thresh
 sum(is.cell, na.rm=TRUE)
 ```
 
