@@ -15,19 +15,19 @@ suppressPackageStartupMessages({
 })
 
 k_obs_groups.list <- list(
-  "P009" = 5,
-  "P022" = 2,
-  "P027" = 3,
+  "P009" = 6,
+  "P022" = 4,
+  "P027" = 4,
   "P087" = 6,
-  "P069" = 3
+  "P069" = 4
 )
 
-sce <- readRDS(file = "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nxf/results/SCE/annotated_tumor.sce")
+sce <- readRDS(file = "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-annotations/SCE_labeled_tumor.rds")
 
 sce$cell_type_infercnv <- colData(sce) %>%
   as.data.frame() %>%
   mutate(cell_type_manual = case_when(
-    cell_type_manual == "MCL cells" ~ paste("MCL", Timepoint, Compartment),
+    cell_tumor == "MCL cells" ~ paste("MCL", Timepoint, Compartment),
     TRUE ~ "Reference"
   )) %>% pull(cell_type_manual)
 
@@ -96,6 +96,6 @@ for (patient_i in names(k_obs_groups.list)) {
     file.path(workdir, patient_i)
   file.copy(
     file.path(inferCNV.sample.path, "infercnv.png"),
-    file.path(workdir, paste0(patient_i, ".png"))
+    file.path(workdir, "output", paste0(patient_i, ".png"))
   )
 }
