@@ -1,8 +1,8 @@
 library(tidyverse)
 
-wd <- "/mnt/data/NGS/Projects/MCL-scrnaseq-phanthomMenace/data/scRNAseq"
+wd <- "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-alignment"
 
-fastq.dir <- file.path(wd, "fastq/pooled")
+fastq.dir <- "/mnt/data/NGS/Projects/MCL-scrnaseq/data/scRNAseq/fastq"
 
 samples <- data.frame(
   files = list.files(fastq.dir, pattern = ".fastq.gz$", full.names = T)
@@ -17,4 +17,4 @@ samples <- data.frame(
   ) %>% 
   pivot_wider(values_from = file.name, names_from = read)
 
-write_tsv(samples, file.path(wd, "alingment", "samples"), col_names = FALSE)
+write_tsv(samples, file.path(wd, "samples"), col_names = FALSE)

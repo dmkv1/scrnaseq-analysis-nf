@@ -7,7 +7,7 @@ library(tidyverse)
 ```
 
 ```{r}
-samples_path <- "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/alignment/output"
+samples_path <- "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-alignment/output"
 
 sample_dirs <- list.dirs(samples_path, recursive = F, full.names = F)
 
