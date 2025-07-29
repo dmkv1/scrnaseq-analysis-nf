@@ -2,11 +2,11 @@
 title: "Joined dataset clustering"
 params:
   seed: 42
-  metadata_file: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nf/metadata_samples.csv"
-  input_file: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nf/results/SCE/merged.sce"
-  marker_genes: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/Marker_genes/Marker_genes.csv"
-  sc_functions: "/mnt/data/NGS/Projects/MCL-scrnaseq/MCL-PhanthomMenace/scrnaseq-analysis-nf/bin/sc_functions.R"
-  output_file: "annotated.sce"
+  metadata_file: "../samples.csv"
+  input_file: "../results/SCE/SCE_merged.rds"
+  marker_genes: "../marker_genes/immunological_markers.csv"
+  sc_functions: "../bin/sc_functions.R"
+  output_file: "../results/SCE/SCE_annotated.rds"
 ---
 
 ```{r setup}
@@ -42,13 +42,12 @@ sce <- readRDS(path_sce_input)
 sce
 ```
 
-
 # Read the metadata
 
 ```{r message=FALSE}
-metadata <- read_csv(path_metadata) %>%
+metadata <- read_csv(path_metadata, show_col_types = F) %>%
   mutate(
-    Sample_Label = paste(patient, timepoint, compartment, replicate, sep = " "),
+    Sample_Label = paste(patient, label, replicate, sep = " "),
     .after = replicate
   )
 metadata
@@ -57,10 +56,10 @@ metadata
 # Assign full sample labels
 
 ```{r load_sce}
-sce$Sample_Label <- colData(sce) %>% 
+sce[["Sample_Label"]] <- colData(sce) %>% 
   as.data.frame() %>% 
   mutate(
-    Sample_Label = paste(Patient, Timepoint, Compartment, Replicate, sep = " "),
+    Sample_Label = paste(patient, label, replicate, sep = " "),
     Sample_Label = factor(Sample_Label, levels = metadata$Sample_Label)
   ) %>% 
   pull(Sample_Label)

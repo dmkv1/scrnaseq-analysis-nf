@@ -22,16 +22,15 @@ workflow {
         .map { row ->
             def sample_id = row.sample
             def patient_id = row.patient
-            def timepoint = row.timepoint
-            def compartment = row.compartment
+            def label = row.label
             def replicate = row.replicate
             def raw_fbmtx = file(row.raw_feature_bc_matrix)
 
-            return [sample_id, patient_id, timepoint, compartment, replicate, raw_fbmtx]
+            return [sample_id, patient_id, label, replicate, raw_fbmtx]
         }
 
-    ch_metadata = ch_input_samples.map { sample_id, patient_id, timepoint, compartment, replicate, _raw_fbmtx ->
-        return [sample_id, patient_id, timepoint, compartment, replicate]
+    ch_metadata = ch_input_samples.map { sample_id, patient_id, label, replicate, _raw_fbmtx ->
+        return [sample_id, patient_id, label, replicate]
     }
 
     MATRIX_TO_SCE(ch_input_samples)
@@ -51,7 +50,7 @@ workflow {
         seed,
     )
 
-    ch_raw_fbmtx = ch_input_samples.map { sample_id, _patient_id, _timepoint, _compartment, _replicate, raw_fbmtx ->
+    ch_raw_fbmtx = ch_input_samples.map { sample_id, _patient_id, _label, _replicate, raw_fbmtx ->
         return [sample_id, raw_fbmtx]
     }
 
@@ -62,8 +61,8 @@ workflow {
 
     ch_clean_fbmtx = AMBIENT_RNA.out.clean_fbmtx
         .join(ch_metadata)
-        .map { sample_id, clean_fbmtx, patient_id, timepoint, compartment, replicate ->
-            return [sample_id, patient_id, timepoint, compartment, replicate, clean_fbmtx]
+        .map { sample_id, clean_fbmtx, patient_id, label, replicate ->
+            return [sample_id, patient_id, label, replicate, clean_fbmtx]
         }
 
     CLEAN_MATRIX_TO_SCE(ch_clean_fbmtx)
@@ -112,7 +111,8 @@ workflow {
     JOINT_CLUSTERING(
         file("templates/4_clustering.Rmd"),
         file("bin/sc_functions.R"),
-        file("marker_genes/Marker_genes.csv"),
+        file(params.samples),
+        file("marker_genes/immunological_markers.csv"),
         MERGE.out.merged_sce,
         seed,
     )

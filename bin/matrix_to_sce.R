@@ -26,16 +26,10 @@ option_list <- list(
     help = "Patient ID"
   ),
   make_option(
-    c("--timepoint"),
+    c("--label"),
     type = "character",
     default = NULL,
-    help = "Timepoint"
-  ),
-  make_option(
-    c("--compartment"),
-    type = "character",
-    default = NULL,
-    help = "Compartment"
+    help = "Additional label(s)"
   ),
   make_option(
     c("--replicate"),
@@ -50,8 +44,7 @@ opts <- parse_args(opt_parser)
 fbmtx_path <- opts$fbmtx_path
 sample_id <- opts$sample_id
 patient_id <- opts$patient_id
-timepoint <- opts$timepoint
-compartment <- opts$compartment
+label <- opts$label
 replicate <- opts$replicate
 
 sce <- DropletUtils::read10xCounts(
@@ -61,17 +54,15 @@ sce <- DropletUtils::read10xCounts(
 )
 
 # Assign sample column values
-sce[["Patient"]] <- patient_id
-sce[["Timepoint"]] <- timepoint
-sce[["Compartment"]] <- compartment
-sce[["Replicate"]] <- replicate
+sce[["patient"]] <- patient_id
+sce[["label"]] <- label
+sce[["replicate"]] <- replicate
 
 # Add metadata
-metadata(sce)$Sample <- sample_id
-metadata(sce)$Patient <- patient_id
-metadata(sce)$Timepoint <- timepoint
-metadata(sce)$Compartment <- compartment
-metadata(sce)$Replicate <- replicate
+metadata(sce)$sample <- sample_id
+metadata(sce)$patient <- patient_id
+metadata(sce)$label <- label
+metadata(sce)$replicate <- replicate
 
 cat("Writing SCE:")
 print(sce)

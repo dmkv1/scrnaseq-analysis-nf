@@ -19,7 +19,8 @@ process JOINT_CLUSTERING {
     input:
     path "clustering.Rmd"
     path "sc_functions.R"
-    path "Marker_genes.csv"
+    path "samples.csv"
+    path "marker_genes.csv"
     path merged_sce
     val seed
 
@@ -44,7 +45,8 @@ process JOINT_CLUSTERING {
                     input_file = '${merged_sce}',
                     output_file = 'SCE_clustered.rds',
                     sc_functions = 'sc_functions.R',
-                    marker_genes = 'Marker_genes.csv'
+                    marker_genes = 'marker_genes.csv',
+                    metadata_file = 'samples.csv'
                     ))"
     """
 }

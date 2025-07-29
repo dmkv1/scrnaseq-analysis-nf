@@ -1,2 +1,5 @@
-﻿sample,patient,timepoint,compartment,replicate,expected_cells,nUMI_thresh,nGenes_thresh,mito_thresh,contam_thresh,raw_feature_bc_matrix
-sample1,P1,dg1,blood,1,10000,3000,300,10,0.9,/path/to/feature_barcode_matrix/
+﻿sample,patient,label,replicate,expected_cells,nUMI_thresh,nGenes_thresh,mito_thresh,contam_thresh,raw_feature_bc_matrix
+sample1,P1,dg_blood,1,10000,3000,300,10,0.9,/path/to/sample1/feature_barcode_matrix/
+sample2,P1,dg_blood,2,10000,3000,300,10,0.9,/path/to/sample2/feature_barcode_matrix/
+sample3,P1,rel_blood,1,10000,3000,300,10,0.9,/path/to/sample3/feature_barcode_matrix/
+sample4,P1,rel_blood,2,10000,3000,300,10,0.9,/path/to/sample4/feature_barcode_matrix/
