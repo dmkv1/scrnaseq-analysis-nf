@@ -201,11 +201,17 @@ plotUMAP(sce,
 
 ```{r, fig.width=15, fig.height=4.5}
 plotUMAP(sce,
-         color_by = "contamination") +
+         color_by = "sum") +
   plotUMAP(sce,
-         color_by = "CD3E") +
+         color_by = "detected") +
   plotUMAP(sce,
-         color_by = "IGKC")
+         color_by = "subsets_Mito_percent")
+```
+
+```{r, fig.width=15, fig.height=4.5}
+plotUMAP(sce, color_by = "CD3E") +
+  plotUMAP(sce, color_by = "IGKC") +
+  plotUMAP(sce, color_by = "contamination")
 ```
 
 # Discard problematic cells
